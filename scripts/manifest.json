@@ -1,0 +1,165 @@
+{
+  "_comment": [
+    "《锅从天降》判定库批量生成清单。",
+    "",
+    "这份文件由浏览器直接从运行中的页面导出（NPCS / ARGUMENT_TYPES / VERDICTS 三个全局），",
+    "而不是手抄自 data/*.js —— 目的是保证脚本读到的数据结构与游戏实际加载的完全一致。",
+    "复现方式：打开 index.html，在控制台执行 scripts/export-manifest.js。",
+    "",
+    "generate-verdicts.ps1 消费这份清单，产出 data/verdicts.generated.js。",
+    "它**不会**覆盖 data/verdicts.js —— 那一份是经过人工精修的线上版本。"
+  ],
+  "generatedAt": "2026-09-11",
+
+  "rules": {
+    "typesForKind": {
+      "normal":   ["事实型", "情感型", "转移型", "反向型", "荒诞型"],
+      "abstract": ["事实型", "情感型", "荒诞型"],
+      "self":     []
+    },
+    "_typesForKind_comment": [
+      "抽象 NPC（天气 / 水逆 / 你的星座）只吃三种：",
+      "转移型对它们无意义（没有职责边界可谈），反向型对它们无意义（它们没有发起过任何行为）。",
+      "",
+      "self 类为空是刻意的：future_self 与 past_self 的判定文案写死在 npcs.js 的",
+      "fixedVerdict / fixedReaction 字段里，引擎走 source=fixed 分支直接返回，",
+      "从不读取判定库。它们不需要、也不应该有库条目。"
+    ],
+    "abstractReactionRule": "抽象 NPC 无法开口，reaction 写成括号内的状态描述，例如「（它无法拒绝）」，不要写成台词。"
+  },
+
+  "argumentTypes": [
+    {
+      "name": "事实型",
+      "basePower": 62,
+      "desc": "援引客观事实、记录、已有分工作依据",
+      "keywords": ["记录", "截图", "日志", "签字", "排班表", "值日", "认领", "群里说", "时间戳", "数据", "名单"],
+      "locked": false
+    },
+    {
+      "name": "情感型",
+      "basePower": 48,
+      "desc": "援引自己的状态、付出、情绪作依据",
+      "keywords": ["累", "尽力", "熬", "撑不住", "已经", "连续", "真的", "我最近", "睡不着", "焦虑"],
+      "locked": false
+    },
+    {
+      "name": "转移型",
+      "basePower": 44,
+      "desc": "援引流程、制度、职责边界，主张责任不属于自己这一环",
+      "keywords": ["流程", "制度", "规定", "条例", "职责", "边界", "本来就", "没人明确", "培养方案", "公示"],
+      "locked": false
+    },
+    {
+      "name": "反向型",
+      "basePower": 58,
+      "desc": "把对方的行为当作自己行为的原因，责任反推给发起方",
+      "keywords": ["是您", "是你", "你们说", "他自己说", "照着您", "让我", "批的", "先说"],
+      "locked": true,
+      "unlockCredit": 3
+    },
+    {
+      "name": "荒诞型",
+      "basePower": 10,
+      "desc": "援引无法证伪的玄学、超自然、无厘头前提",
+      "keywords": ["水逆", "水星", "星座", "八字", "运势", "宇宙", "魔法", "鬼", "命", "玄学"],
+      "locked": false
+    }
+  ],
+  "_argumentTypes_comment": "basePower / keywords / locked 仅供人阅读与校验，生成 prompt 里不使用它们 —— 说服力一律由 engine/fallback.js 实算，绝不让模型输出数值。",
+
+  "npcs": [
+    { "id": "didi",        "name": "学弟学妹",     "kind": "normal",   "scene": null,       "difficulty": 1.0, "moralCost": "高", "prefers": ["情感型"],           "dislikes": ["转移型", "反向型"],              "desc": "讨好型，几乎不会拒绝，回答里常带犹豫和自我说服，从不抱怨" },
+    { "id": "roommate",    "name": "室友",         "kind": "normal",   "scene": null,       "difficulty": 1.2, "moralCost": "中", "prefers": ["事实型"],           "dislikes": ["反向型", "荒诞型"],              "desc": "平等关系，会反驳也会认账，语气直接，会记账" },
+    { "id": "moyu",        "name": "摸鱼组员",     "kind": "normal",   "scene": null,       "difficulty": 1.5, "moralCost": "中", "prefers": ["事实型", "转移型"], "dislikes": ["情感型"],                        "desc": "他自己就在摸鱼，被甩时有四成概率把锅原样扔回来" },
+    { "id": "xuezhang",    "name": "社团学长",     "kind": "normal",   "scene": null,       "difficulty": 2.0, "moralCost": "中", "prefers": ["转移型", "事实型"], "dislikes": ["情感型", "荒诞型"],              "desc": "甩锅老手，擅长把责任包装成「锻炼机会」，反甩时会用这句话" },
+    { "id": "daoshi",      "name": "导师",         "kind": "normal",   "scene": null,       "difficulty": 3.0, "moralCost": "中", "prefers": ["事实型"],           "dislikes": ["反向型", "情感型", "荒诞型"],    "desc": "权力上位，语气平淡而有压迫感，不解释理由，一句话就能让人闭嘴" },
+    { "id": "jiaowu",      "name": "教务处",       "kind": "normal",   "scene": null,       "difficulty": 1.6, "moralCost": "中", "prefers": ["转移型", "事实型"], "dislikes": ["情感型", "荒诞型"],              "desc": "官僚系统，只会输出模板化公文用语；理由含书面语时说服力额外加成", "formalBonus": true },
+    { "id": "fudaoyuan",   "name": "辅导员",       "kind": "normal",   "scene": null,       "difficulty": 1.6, "moralCost": "中", "prefers": ["情感型"],           "dislikes": ["荒诞型"],                        "desc": "习惯用「你再想想」化解一切，锅会悬空不落，不好也不坏", "suspend": true },
+    { "id": "shitang",     "name": "食堂阿姨",     "kind": "normal",   "scene": null,       "difficulty": 1.0, "moralCost": "高", "prefers": ["事实型"],           "dislikes": ["反向型", "荒诞型"],              "desc": "无辜。甩给她时裁判点评会变得温柔，反而更让人内疚" },
+    { "id": "ex",          "name": "前任",         "kind": "normal",   "scene": "情感社交", "difficulty": 2.2, "moralCost": "中", "prefers": ["情感型"],           "dislikes": ["事实型", "转移型", "荒诞型"],    "desc": "只接情感类的锅。学业和行政的锅甩过去会被原样扔回来" },
+    { "id": "tianqi",      "name": "天气",         "kind": "abstract", "scene": null,       "difficulty": 0.3, "moralCost": "低", "prefers": [],                   "dislikes": [],                                "desc": "抽象概念，无法开口，由裁判代为陈述其「态度」" },
+    { "id": "shuini",      "name": "水逆",         "kind": "abstract", "scene": null,       "difficulty": 0.3, "moralCost": "低", "prefers": [],                   "dislikes": [],                                "desc": "抽象概念，无法开口，由裁判代为陈述其「态度」；一本正经配合荒谬前提" },
+    { "id": "xingzuo",     "name": "你的星座",     "kind": "abstract", "scene": null,       "difficulty": 0.3, "moralCost": "低", "prefers": [],                   "dislikes": [],                                "desc": "抽象概念，无法开口，由裁判代为陈述其「态度」" },
+    { "id": "future_self", "name": "未来的自己",   "kind": "self",     "scene": null,       "difficulty": 0.0, "moralCost": "低", "prefers": ["情感型"],           "dislikes": [],                                "desc": "还没发生，无法回应，只能由裁判陈述后果。甩给他等于拖延", "fixedText": true },
+    { "id": "past_self",   "name": "过去的自己",   "kind": "self",     "scene": null,       "difficulty": 1.0, "moralCost": "高", "prefers": [],                   "dislikes": [],                                "desc": "已无法辩解", "fixedText": true }
+  ],
+
+  "existingKeys": [
+    "didi::事实型", "didi::情感型", "didi::转移型", "didi::反向型", "didi::荒诞型",
+    "roommate::事实型", "roommate::情感型", "roommate::转移型", "roommate::反向型", "roommate::荒诞型",
+    "moyu::事实型", "moyu::情感型", "moyu::转移型", "moyu::反向型", "moyu::荒诞型",
+    "xuezhang::事实型", "xuezhang::情感型", "xuezhang::转移型", "xuezhang::反向型", "xuezhang::荒诞型",
+    "daoshi::事实型", "daoshi::情感型", "daoshi::转移型", "daoshi::反向型", "daoshi::荒诞型",
+    "jiaowu::事实型", "jiaowu::情感型", "jiaowu::转移型", "jiaowu::反向型", "jiaowu::荒诞型",
+    "fudaoyuan::事实型", "fudaoyuan::情感型", "fudaoyuan::转移型", "fudaoyuan::反向型", "fudaoyuan::荒诞型",
+    "shitang::事实型", "shitang::情感型", "shitang::转移型", "shitang::反向型", "shitang::荒诞型",
+    "ex::事实型", "ex::情感型", "ex::转移型", "ex::反向型", "ex::荒诞型",
+    "tianqi::事实型", "tianqi::情感型", "tianqi::荒诞型",
+    "shuini::事实型", "shuini::情感型", "shuini::荒诞型",
+    "xingzuo::事实型", "xingzuo::情感型", "xingzuo::荒诞型"
+  ],
+  "_existingKeys_comment": "54 条，等于 9 个 normal NPC x 5 类型 + 3 个 abstract NPC x 3 类型。覆盖率 100%，无缺口。",
+  "existingTechniques": [
+    "边界防卫线",
+    "边界切割术",
+    "不可抗力函",
+    "层级越位契",
+    "档案冷处理",
+    "分工真空区",
+    "工时对账簿",
+    "管辖权切割",
+    "光照偏折说",
+    "归因倒逼法",
+    "轨道错位论",
+    "锅气玄学说",
+    "过去时倒悬",
+    "合规性反噬",
+    "宏大叙事解构",
+    "黄道免责约",
+    "精神代偿流",
+    "镜像归因律",
+    "旧账反扣法",
+    "苦劳假象法",
+    "历史分工锚",
+    "量子摸鱼论",
+    "流程真空带",
+    "炉灶边界论",
+    "履历倒植法",
+    "逆向训诫令",
+    "气场感应论",
+    "气象归因流",
+    "前辈苦劳证",
+    "情感断舍离",
+    "情绪缓冲带",
+    "神话绑架术",
+    "生活账目表",
+    "湿度共情术",
+    "食材溯源链",
+    "宿命温情牌",
+    "宿舍风水说",
+    "台账溯源术",
+    "条款索引流",
+    "同室操戈术",
+    "系统超负荷",
+    "心力重压法",
+    "虚空共振术",
+    "玄学承压阵",
+    "玄学断交令",
+    "烟火温情牌",
+    "因果倒悬式",
+    "引力篡改罪",
+    "原始档案裁",
+    "运势外包术",
+    "灶台对账单",
+    "责任回弹锤",
+    "章程盲区律",
+    "职能再分配"
+  ],
+  "_existingTechniques_comment": "54 个手法名，全库无重复。generate-verdicts.ps1 会把这份名单整份塞进 prompt，让模型看得见哪些名字已被占用；只给 existingKeys 不够，组合键里没有名字，模型无从避重（「磁场」一词曾被复用 4 次）。",
+
+  "genericFallback": {
+    "事实型": 3, "情感型": 3, "转移型": 3, "反向型": 3, "荒诞型": 3
+  },
+  "_genericFallback_comment": "每种论证类型另备 3 条通用文案，用于库里没有的组合。运行时按类型轮换，不重复。"
+}

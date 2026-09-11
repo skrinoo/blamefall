@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>锅从天降 · BlameFall</title>
+<meta name="description" content="一款教你甩锅的爽游，和一堂教你接锅的课。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════════════ 标题屏 ══════════════════════ -->
+<section id="screen-title" class="screen is-active">
+  <div class="title-wrap">
+    <div class="title-pot" aria-hidden="true">🍲</div>
+    <h1 class="title-main">锅从天降</h1>
+    <p class="title-sub">一款教你甩锅的爽游，和一堂教你接锅的课</p>
+
+    <div class="title-thesis">
+      <p>锅不会消失，只会转移。</p>
+      <p class="dim">60 秒，看看你能把它推给谁。</p>
+    </div>
+
+    <button id="btn-start" class="btn btn-primary btn-lg">开始接锅</button>
+
+    <ul class="title-howto">
+      <li><b>点住</b>天上掉下来的锅 —— 时间会慢下来，但不会停</li>
+      <li><b>选一个人</b>，再<b>选一句理由</b> —— 锅就飞过去了</li>
+      <li>理由可以自己写。<b>写得越好，甩得越远</b></li>
+      <li class="secret">还有一个动作没人告诉你：把锅<b>拖回自己身上</b></li>
+    </ul>
+
+    <p class="title-meta">
+      <span id="meta-mode">离线模式 · 判定库 54 条</span>
+      <span class="sep">|</span>
+      <span>按 <kbd>`</kbd> 打开开发者面板</span>
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════════ 游戏屏 ══════════════════════ -->
+<section id="screen-game" class="screen">
+
+  <header id="hud">
+    <div class="hud-cell hud-score">
+      <span class="hud-label">甩锅得分</span>
+      <span class="hud-value" id="hud-score">0</span>
+    </div>
+
+    <div class="hud-cell hud-center">
+      <div class="act-line">
+        <span id="hud-act">第一幕</span>
+        <span id="hud-act-name">爽</span>
+      </div>
+      <div class="timebar"><div class="timebar-fill" id="hud-timebar"></div></div>
+      <span class="hud-time" id="hud-time">60.0</span>
+    </div>
+
+    <div class="hud-cell hud-shadow">
+      <span class="hud-label">心理阴影面积</span>
+      <div class="shadowbar"><div class="shadowbar-fill" id="hud-shadowbar"></div></div>
+      <span class="hud-value small" id="hud-shadow">0</span>
+    </div>
+
+    <div class="hud-cell hud-credit" id="hud-credit-cell" title="接锅信用">
+      <span class="hud-label">☂ 接锅</span>
+      <span class="hud-value" id="hud-credit">0</span>
+    </div>
+  </header>
+
+  <main id="stage">
+    <div id="sky"></div>
+
+    <div id="actor" title="点自己＝接锅">
+      <div class="actor-hands">🙌</div>
+      <div class="actor-body">🧍</div>
+      <div class="actor-name">你</div>
+    </div>
+
+    <div id="fx"></div>
+  </main>
+
+  <footer id="npcbar"></footer>
+
+  <!-- 解说员 -->
+  <div id="toast" class="toast"></div>
+
+  <!-- 辩 · 论证面板 -->
+  <div id="panel" class="panel">
+    <div class="panel-timer" id="panel-timer"><i></i></div>
+    <div class="panel-head">
+      <div class="panel-pot">
+        <span class="panel-pot-icon">🍲</span>
+        <span class="panel-pot-text" id="panel-pot-text"></span>
+      </div>
+      <div class="panel-target" id="panel-target"></div>
+    </div>
+    <div class="panel-options" id="panel-options"></div>
+    <div class="panel-free">
+      <input id="panel-input" type="text" maxlength="40"
+             placeholder="自己写一句理由（AI 实时裁判，写得越好甩得越远）" autocomplete="off">
+      <button id="panel-send" class="btn btn-ghost">甩</button>
+    </div>
+    <button id="panel-close" class="panel-close" title="放手（锅会继续掉）">✕</button>
+  </div>
+
+  <!-- 裁判判定气泡 -->
+  <div id="bubble" class="bubble">
+    <div class="bubble-technique" id="bubble-technique"></div>
+    <div class="bubble-verdict" id="bubble-verdict"></div>
+    <div class="bubble-reaction" id="bubble-reaction"></div>
+    <div class="bubble-metrics" id="bubble-metrics"></div>
+  </div>
+
+  <!-- 崩溃 / 结束遮罩 -->
+  <div id="flash" class="flash"></div>
+</section>
+
+<!-- ══════════════════════ 结算卷宗 ══════════════════════ -->
+<section id="screen-report" class="screen">
+  <div class="report-wrap">
+    <p class="report-eyebrow">甩锅事故处理卷宗</p>
+    <h2 class="report-rank" id="report-rank"></h2>
+    <p class="report-score" id="report-scoreline">得分 <b id="report-score">0</b>
+       <span class="dim">·</span> 心理阴影面积 <b id="report-shadow">0</b></p>
+
+    <div class="report-body" id="report-body"></div>
+
+    <div class="report-act4" id="report-act4"></div>
+
+    <div class="report-actions">
+      <button id="btn-again" class="btn btn-primary">再来一局</button>
+      <button id="btn-home" class="btn btn-ghost">回标题</button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ 开发者面板 ══════════════════════ -->
+<div id="devpanel" class="devpanel">
+  <div class="dev-head">
+    <span>开发者面板</span>
+    <button id="dev-close" class="dev-close">✕</button>
+  </div>
+  <pre id="dev-log"></pre>
+  <div class="dev-tools">
+    <label><input type="checkbox" id="dev-metrics"> 显示 S/A/G/P</label>
+    <label><input type="checkbox" id="dev-slowmo"> 半速</label>
+    <label><input type="checkbox" id="dev-nodie"> 不掉血</label>
+    <button id="dev-end" class="btn btn-ghost btn-sm">立即结算</button>
+  </div>
+</div>
+
+<script src="data/npcs.js"></script>
+<script src="data/pots.js"></script>
+<script src="data/arguments.js"></script>
+<script src="data/verdicts.js"></script>
+<script src="data/commentary.js"></script>
+<script src="engine/fallback.js"></script>
+<script src="engine/judge.js"></script>
+<script src="engine/api.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
