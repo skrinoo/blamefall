@@ -12,37 +12,40 @@
 |---|---|
 | 端点 | `POST /api/judge` |
 | 实现 | `api/judge.mjs`（刻意做薄）+ `api/_gateway.mjs`（网络/配置/错误分类共享层） |
-| 诊断端点 | `GET /api/health?probe=3&budget=1350`（`api/health.mjs`） |
+| 诊断端点 | `GET /api/health?probe=3&budget=1850`（`api/health.mjs`） |
 | 触发时机 | **仅**玩家使用「自由输入」时 |
 | 网关 | `openai-next`（OpenAI 兼容，请求 `{base}/chat/completions`） |
 | 模型 | `gemini-2.5-flash` |
-| 延迟预算 | **1350ms**（超出即切本地兜底），由 1.5s 飞行动画做乐观 UI 覆盖 |
+| 延迟预算 | **1850ms**（超出即切本地兜底），由 2.0s 飞行动画做乐观 UI 覆盖 |
 | temperature | `0.85` |
 | max_tokens | `0`（不限制） |
 | 单次输出 | 约 130 tokens |
 | System Prompt | **`prompts/judge-v3.txt`** —— 唯一权威副本，服务端运行时用 `fs.readFile` 读 |
 
-### 延迟预算为什么是 1350ms 而不是更早的 800ms
+### 延迟预算为什么是 1850ms：800 → 1350 → 实测重算
 
 `game.js` 的自由输入是：
 
 ```js
-Promise.all([payload, delay(ms)])   // ms = flightMs = 1500
+Promise.all([payload, delay(ms)])   // ms = flightMs = 2000
 ```
 
-总时长 = `max(判定耗时, 1500ms)`。飞行动画本来就要播满 1.5 秒，
+总时长 = `max(判定耗时, 2000ms)`。飞行动画本来就要播满 2.0 秒，
 判定在这之前的**任何**时刻回来都是零感知成本的。
 
 原来的 800ms 等于主动扔掉 700ms 免费窗口：AI 只慢一点点就被丢弃、
-退化成兜底文案，而玩家根本感觉不到那 700ms。现在的 1350ms 紧贴 `flightMs`，
+退化成兜底文案，而玩家根本感觉不到那 700ms。1350ms 曾是紧贴 1500ms 动画的
+预算值；2026-09-11 生产实测 median 1711ms 把它击穿了，按 DEPLOY.md §4 公式
+（flightMs ≥ p50+200、timeout ≈ flightMs-150）重算成现在的 1850 / 2000，
 留 150ms 给 `Promise.all` 调度与 `finishThrow` 的 DOM 渲染。
 
 **上限是硬约束：`timeout` 必须小于 `flightMs`。** 反了的话，
 锅飞到 NPC 头上之后还要干等几百毫秒才出气泡，那是肉眼可见的卡顿。
 
-> ⚠️ 1350ms 仍然是**预算**，不是实测值。真实网关延迟用
-> `GET /api/health?probe=3&budget=1350` 拿 min/median/max 分布；
-> 若中位数超出预算，调整规则见 `docs/DEPLOY.md` 第 4 节。
+> ✅ 2026-09-11 已实测：`gemini-2.5-flash` 经 `openai-next` 网关
+> min/median/max = **1560 / 1711 / 2207ms**（无错误码）。
+> 复测命令：`GET /api/health?probe=3&budget=1850`；
+> 若中位数再次超出预算，调整规则见 `docs/DEPLOY.md` 第 4 节。
 
 > **为什么只有自由输入才调 AI？**
 > 快速选项（4 个固定论证类型）的理由文本是**固定的**，判定结果可完全预生成 →

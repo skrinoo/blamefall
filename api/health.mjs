@@ -3,8 +3,9 @@
  *
  * 存在的理由，按重要性排序：
  *
- * 1. **补上真实延迟数据。** 客户端 800ms（现 1350ms）的预算从头到尾都只是预算，
- *    从来没有实测过。`?probe=1` 会走与 /api/judge **完全相同**的上游代码路径
+ * 1. **补上真实延迟数据。** 客户端 800ms → 1350ms → 现 1850ms 的预算，
+ *    在部署前从来没有实测过 —— 2026-09-11 首测 median 1711ms，
+ *    现值 1850 就是按它反推的。`?probe=1` 会走与 /api/judge **完全相同**的上游代码路径
  *    （同一个 callGateway、同一个 model / temperature / max_tokens），
  *    所以它报出来的数字就是真实判定的延迟。
  *    `?probe=3` 串行跑三次给 min / median / max —— 单次数字没有意义，
@@ -168,14 +169,14 @@ export default async function handler(req, res) {
 
       // 预算对比。budget 由**调用方声明**，服务端不持有前端超时值 ——
       // 否则 engine/api.js 改了 timeout，这里就成了第二份过期真相。
-      //   curl 'https://your-app/api/health?probe=3&budget=1350'
+      //   curl 'https://your-app/api/health?probe=3&budget=1850'
       const budget = Number(q.budget);
       if (Number.isFinite(budget) && budget > 0 && lat.length) {
         out.probe.budget = {
           ms: budget,
           medianWithinBudget: median(lat) <= budget,
           allWithinBudget: lat.every((x) => x <= budget),
-          note: "客户端的飞行动画长 1500ms，判定只要在动画结束前回来就是零感知成本，" +
+          note: "客户端的飞行动画长 2000ms，判定只要在动画结束前回来就是零感知成本，" +
                 "所以 budget 应当接近 flightMs 而不是越小越好。",
         };
       }

@@ -117,7 +117,7 @@ BLAMEFALL_API_KEY  = <网关密钥>
 ### ① 健康检查
 
 ```powershell
-Invoke-RestMethod 'https://<你的域名>/api/health?probe=3&budget=1350' | ConvertTo-Json -Depth 6
+Invoke-RestMethod 'https://<你的域名>/api/health?probe=3&budget=1850' | ConvertTo-Json -Depth 6
 ```
 
 看四个字段：
@@ -174,7 +174,7 @@ AI 裁判返回 S=xx · <手法名>
 | 同上 | `probe.errorCodes: ["http_401"]` | 密钥错 / `base_url` 少了或多了一段 | `BLAMEFALL_API_BASE` 要到 `/v1` 为止，代码会自己拼 `/chat/completions` |
 | 同上 | `probe.errorCodes: ["empty_content"]` | 用了**思考型模型** | 换 `gemini-2.5-flash`。`step-3.7-flash` 实测烧 4409 completion_tokens 却只回吐思维链、正文为空 |
 | 同上 | `probe.errorCodes: ["timeout"]` | 上游超过 6s | 调大 `BLAMEFALL_UPSTREAM_TIMEOUT`，同时检查 `maxDuration` 是否还够 |
-| 同上，但 health 全绿 | `latencyMs.median > 1350` | 网关比预算慢 | 见下一节调预算 |
+| 同上，但 health 全绿 | `latencyMs.median > 1850` | 网关比预算慢 | 见下一节调预算 |
 | 部署直接失败 | — | `maxDuration` 超出计划上限 | Hobby 计划下调 `api/health.mjs` 的 `maxDuration`，并同步改 `vercel.json` |
 | 部署日志 `unsupported "runtime" value in \`config\`` | —（部署阶段就失败，没有 health 可读） | `api/*.mjs` 的 `export const config` 里写了 `runtime: "nodejs20.x"` | 删掉 `runtime` 键，只留 `maxDuration`；Node 版本走项目设置。2026-09-11 首次部署实测命中 |
 
@@ -253,8 +253,8 @@ $env:BLAMEFALL_API_BASE = 'https://<你的网关>/v1'
 $env:BLAMEFALL_API_KEY  = '<密钥>'
 .\dev-server.ps1
 
-# 验证超时降级：mock 延迟 1500ms > timeout 1350ms，应当看到面板打印「兜底引擎」
-.\dev-server.ps1 -MockLatencyMs 1500
+# 验证超时降级：mock 延迟 2000ms > timeout 1850ms，应当看到面板打印「兜底引擎」
+.\dev-server.ps1 -MockLatencyMs 2000
 ```
 
 > ⚠️ `dev-server.ps1` 没有任何鉴权，**只用于本地开发**，绝不要暴露到公网。

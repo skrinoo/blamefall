@@ -19,9 +19,12 @@
  *   apiBase  形如 "https://your-app.vercel.app"，留空 = 离线模式。
  *            部署态下会被下方的 autoSameOrigin() 自动填成页面自己的 origin，
  *            所以推到 Vercel 就是活的，不需要任何人改配置。
- *   timeout  默认 1350ms。这个预算是被 1.5s 飞行动画反推出来的：
- *            动画在播，玩家在听解说，判定在动画期间悄悄回来 → 感知零延迟。
- *            （早期版本这里是 800ms，把 700ms 的免费窗口白白扔掉了，见 CFG 处注释。）
+ *   timeout  默认 1850ms。2026-09-11 生产实测（health?probe=3）网关
+ *            min/median/max = 1560/1711/2207ms，原 1350ms 预算连 median
+ *            都盖不住，按 DEPLOY.md §4 公式重算：flightMs ≥ p50+200 → 2000，
+ *            timeout ≈ flightMs-150 → 1850。动画在播，玩家在听解说，
+ *            判定在动画期间悄悄回来 → 感知零延迟。
+ *            （更早的版本是 800ms/1350ms，把免费窗口白白扔掉了，见 CFG 处注释。）
  */
 (function (root, factory) {
   var data = factory();
@@ -39,22 +42,22 @@
   var CFG = {
     apiBase: "",        // 留空 = 离线模式（file:// 双击即玩）；部署态由 autoSameOrigin() 填上
 
-    // 1350，不是更早的 800。
+    // 1850 / 2000，不是更早的 1350 / 1500，更不是最初的 800。
     //
-    // game.js 的自由输入是 Promise.all([判定, delay(flightMs)])，
-    // 总时长 = max(判定耗时, 1500ms)。飞行动画本来就要播满 1.5 秒，
+    // 2026-09-11 生产实测（gemini-2.5-flash 经 openai-next 网关，
+    // health?probe=3&budget=1350）：min 1560 / median 1711 / max 2207。
+    // 1350 的预算连 median 都盖不住 —— AI 判定大半被丢弃、退化成兜底文案，
+    // 而玩家根本感觉不到动画里多出来的那 0.5 秒。
+    //
+    // 公式（DEPLOY.md §4）：flightMs ≥ p50+200 = 1911 → 取 2000；
+    // timeout ≈ flightMs-150 = 1850。game.js 的自由输入是
+    // Promise.all([判定, delay(flightMs)])，总时长 = max(判定耗时, 2000ms)，
     // 判定在这之前的**任何**时刻回来都是零感知成本的。
-    //
-    // 原来的 800ms 等于主动扔掉 700ms 免费窗口：AI 只慢一点点就被丢弃、
-    // 退化成兜底文案，而玩家根本感觉不到那 700ms。白白浪费了真 AI 判定。
-    //
-    // 留 150ms 余量给 Promise.all 的微任务调度与 finishThrow 的 DOM 渲染，
-    // 确保判定在动画结束前就已经握在手上。
     //
     // 上限是硬约束：timeout **必须小于** flightMs。反了的话，
     // 锅飞到 NPC 头上之后还要干等几百毫秒才出气泡，那是肉眼可见的卡顿。
-    timeout: 1350,      // ms
-    flightMs: 1500      // AI 路径的锅飞行时长，用于覆盖延迟
+    timeout: 1850,      // ms
+    flightMs: 2000      // AI 路径的锅飞行时长，用于覆盖延迟
   };
 
   /** 允许页面覆盖配置：window.BLAMEFALL_CONFIG = { apiBase: "https://..." } */

@@ -47,7 +47,7 @@ export const config = {
   // 不要写 runtime: "nodejs20.x" —— Vercel 已不接受 config 里的 nodejs
   // 运行时值（只认 "edge"），写了直接部署失败；Node 版本由项目设置的
   // Node.js Version 控制。2026-09-11 首次部署就栽在这行上。
-  // 客户端 1350ms 就会放弃（engine/api.js 的 CFG.timeout），
+  // 客户端 1850ms 就会放弃（engine/api.js 的 CFG.timeout），
   // 这里给 10s 只是防止函数在上游卡死时无限挂着。
   maxDuration: 10,
 };

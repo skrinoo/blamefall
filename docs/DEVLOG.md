@@ -43,7 +43,7 @@ step-3.7-flash 在 `max_tokens=2500` 下把预算全烧在思维链上，`messag
 > **「有返回」不等于「可用」**——这是本项目最重要的一条工程直觉。
 
 **② completion_tokens 是选型的关键指标，不是 latency。**
-延迟可以靠乐观 UI 掩盖（1.5s 飞行动画覆盖 1350ms 判定预算），token 烧光了没法掩盖。
+延迟可以靠乐观 UI 掩盖（2.0s 飞行动画覆盖 1850ms 判定预算），token 烧光了没法掩盖。
 
 **③ temperature 分场景。**
 实时裁判 `0.85`（要稳定命中格式），批量文案 `0.92`（要 54 条互不重样）。
@@ -484,6 +484,22 @@ $byNpc[1].Group   # → $null（对标量索引）
 → `$byNpc = @($work | Group-Object ...)`，并在 chunk 循环里加 null 保护。
 修完复算：`15 + 15 + 15 + 9 = 54`，`npc_id` 空值 0 个。
 
+### Vercel 部署的坑：`config.runtime` 不再接受 nodejs 值
+
+2026-09-11 首次部署 5 秒就失败，日志只有一行：
+
+```
+Error: api/health.mjs: unsupported "runtime" value in `config`: "nodejs20.x"
+```
+
+`export const config = { runtime: "nodejs20.x" }` 是旧版 Vercel 文档的标准写法，
+现在 `runtime` 只认 `"edge"`，Node 版本改由项目设置的 Node.js Version 控制。
+阴险之处在于**本地一切正常**：dev-server 不看这个键，冒烟测试 29/29 全绿
+也完全不预警 —— 唯一能暴露它的地方是部署日志。
+
+→ 两个 `.mjs` 删掉 `runtime` 键只留 `maxDuration`，原位置加警示注释防止被加回去；
+同步记入 `docs/DEPLOY.md` §3 故障对照表。
+
 ### 工具层的两个约束
 
 | 约束 | 应对 |
@@ -581,7 +597,7 @@ blamefall/
 ├── engine/
 │   ├── judge.js            P 公式 + 完美论证暴击 + 五种结局
 │   ├── fallback.js         说服力实算（含公文腔加成）
-│   └── api.js              自由输入客户端，1350ms 预算 + autoSameOrigin + 全字段校验
+│   └── api.js              自由输入客户端，1850ms 预算（实测反推）+ autoSameOrigin + 全字段校验
 ├── prompts/
 │   ├── judge-v3.txt        system prompt 唯一权威副本（64 行，UTF-8 无 BOM）
 │   └── judge-v3.md         prompt 规格 + 版本史 + 引擎复算 + 平衡扇展
@@ -605,9 +621,9 @@ blamefall/
 | 项 | 状态 | 说明 |
 |---|---|---|
 | `/api/judge` 服务端 | ✅ 已写完 | `_gateway.mjs` + `judge.mjs` + `health.mjs`；冒烟测试 29/29 全绿（MOCK 模式）；浏览器端到端 423ms 返回 |
-| `/api/judge` 端到端延迟 | ⚠️ 未实测真网关 | 1350ms 是**预算**；部署后 `health?probe=3&budget=1350` 一条命令拿 min/median/max 分布 |
-| 公开仓库 + README | ⚠️ 待推送 | README + .gitignore + 密钥扫描流程已就绪（`docs/DEPLOY.md` §1），待 `git init -b main` + push |
-| Vercel 部署 | ⚠️ 待做 | 代码全部就绪（`vercel.json` + `.env.example` + `docs/DEPLOY.md`），推到 GitHub 后 Vercel Git 集成一键部署 |
+| `/api/judge` 端到端延迟 | ✅ 已实测 | 2026-09-11 生产 probe：min/median/max = 1560/1711/2207ms 无错误码；1350ms 预算击穿，按 DEPLOY.md §4 重算为 timeout 1850 / flightMs 2000 |
+| 公开仓库 + README | ✅ 已推送 | `skrinoo/-blamefall` 公开（待改名为 `blamefall`）；commit d467e08 + b2848d1；密钥扫描三条正则：真密钥形状 0 命中 |
+| Vercel 部署 | ✅ 已上线 | `blamefall.vercel.app`；首次部署栽在 `config.runtime: "nodejs20.x"`（Vercel 只认 edge），删键后 Git 集成自动重部署成功；health 三绿 |
 | 截图验证 | ✅ 已补 | MCP 的 `take_screenshot` 确认不可用（无头实例 `attached=false`，与 IDE 预览面板是两回事）；改为用户手动截图 + `stitch-shots.ps1` 拼接卷宗页（overlap=616 行 / xoff=5px，接缝不可见） |
 | `aiping` 网关 HTTP 402 | 🔴 阻塞 | 余额不足，图像/音乐/TTS 增强层全部无法验证 |
 | 问卷调研 | ⚠️ 未做 | 「问题与用户洞察 25 分」需要证据支撑 |

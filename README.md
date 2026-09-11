@@ -281,11 +281,12 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 | 中文编码链路 | ✅ 手拼 JSON 发真实中文字节，`S=65` 与预期逐字对齐 |
 | 自动同源 | ✅ http 下 `apiBase` 自动填成同源，标题页显示「在线裁判」 |
 | AI 路径端到端 | ✅ 浏览器实测 423ms 返回，`validate()` 全字段通过，中文无乱码 |
-| 超时降级 | ✅ mock 延迟 1500ms > timeout 1350ms，正确 `resolve(null)` 并切兜底引擎 |
+| 超时降级 | ✅ mock 延迟 2000ms > timeout 1850ms，正确 `resolve(null)` 并切兜底引擎 |
 
-**尚未验证的**：真实网关的端到端延迟。`/api/health?probe=3&budget=1350`
-就是为这件事准备的 —— 部署后一条命令拿到 min/median/max 分布。
-在此之前，1350ms 仍然是**预算**而不是实测值。
+**真实网关延迟（2026-09-11 生产实测）**：`gemini-2.5-flash` 经 `openai-next` 网关
+min/median/max = **1560 / 1711 / 2207ms**（`/api/health?probe=3`，无错误码）。
+原 1350ms 预算连 median 都盖不住，已按 `docs/DEPLOY.md` §4 公式重算为
+timeout 1850ms / flightMs 2000ms —— 飞行动画多出的 0.5s 玩家无感知。
 
 ---
 

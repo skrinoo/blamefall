@@ -41,14 +41,14 @@
 
 .PARAMETER MockLatencyMs
     Mock 模式下人为注入的延迟，默认 400ms。
-    调成 1500 可以验证「客户端 1350ms 超时 → 切兜底」这条降级路径。
+    调成 2000 可以验证「客户端 1850ms 超时 → 切兜底」这条降级路径。
 
 .EXAMPLE
     .\dev-server.ps1
     # 然后浏览器打开 http://127.0.0.1:8123/ ，按 ` 键看开发者面板
 
 .EXAMPLE
-    .\dev-server.ps1 -MockLatencyMs 1500
+    .\dev-server.ps1 -MockLatencyMs 2000
     # 验证超时降级：AI 判定应当被丢弃，面板里出现「兜底引擎」而不是「AI 裁判返回」
 
 .NOTES
