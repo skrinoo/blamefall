@@ -500,6 +500,23 @@ Error: api/health.mjs: unsupported "runtime" value in `config`: "nodejs20.x"
 → 两个 `.mjs` 删掉 `runtime` 键只留 `maxDuration`，原位置加警示注释防止被加回去；
 同步记入 `docs/DEPLOY.md` §3 故障对照表。
 
+### vercel.app 在大陆的双层封锁：前一天的 200 是窗口期
+
+2026-09-12 早上复测生产域名：连接超时。逐层查：
+
+1. `Resolve-DnsName blamefall.vercel.app` → `2a03:2880:…face:b00c:…`（Meta 的 IPv6 段）
+   + `199.96.58.177`（Twitter 段）—— 根本不是 Vercel 的 IP
+2. 换 `-Server 8.8.8.8` / `1.1.1.1` → **同样拿到伪造答案**：污染发生在传输途中，不是本机配置
+3. 绕过 DNS 直连 Vercel 边缘 `76.76.21.21:443`：TCP 通，但
+   `SslStream.AuthenticateAsClient('blamefall.vercel.app')` 在握手时被 RST 强断 → SNI 层封锁
+
+结论：DNS + SNI 双层封锁，前一天拿到的 200 是窗口期。
+评委在大陆网络，单挂 vercel 链接等于赌运气。
+
+→ 双链接：GitHub Pages 镜像保底（可玩，自由输入自动降级本地裁判）；
+Vercel 挂自定义域名保 AI 完整版（污染与黑名单都按域名匹配，换自有域名两层同时绕过）。
+查证方法与配置步骤记入 `docs/DEPLOY.md` §8。
+
 ### 工具层的两个约束
 
 | 约束 | 应对 |
@@ -622,8 +639,9 @@ blamefall/
 |---|---|---|
 | `/api/judge` 服务端 | ✅ 已写完 | `_gateway.mjs` + `judge.mjs` + `health.mjs`；冒烟测试 29/29 全绿（MOCK 模式）；浏览器端到端 423ms 返回 |
 | `/api/judge` 端到端延迟 | ✅ 已实测 | 2026-09-11 生产 probe：min/median/max = 1560/1711/2207ms 无错误码；1350ms 预算击穿，按 DEPLOY.md §4 重算为 timeout 1850 / flightMs 2000 |
-| 公开仓库 + README | ✅ 已推送 | `skrinoo/-blamefall` 公开（待改名为 `blamefall`）；commit d467e08 + b2848d1；密钥扫描三条正则：真密钥形状 0 命中 |
+| 公开仓库 + README | ✅ 已推送 | `skrinoo/blamefall` 公开（已改名）；密钥扫描三条正则：真密钥形状 0 命中 |
 | Vercel 部署 | ✅ 已上线 | `blamefall.vercel.app`；首次部署栽在 `config.runtime: "nodejs20.x"`（Vercel 只认 edge），删键后 Git 集成自动重部署成功；health 三绿 |
+| 大陆可达性 | ✅ 双链接 | 2026-09-12 实测 vercel.app 被 DNS 污染 + SNI RST 双层封锁；Pages 镜像 `skrinoo.github.io/blamefall/` 已上线且被封网络可达（含 1850 新预算）；Vercel 自定义域名配置中 |
 | 截图验证 | ✅ 已补 | MCP 的 `take_screenshot` 确认不可用（无头实例 `attached=false`，与 IDE 预览面板是两回事）；改为用户手动截图 + `stitch-shots.ps1` 拼接卷宗页（overlap=616 行 / xoff=5px，接缝不可见） |
 | `aiping` 网关 HTTP 402 | 🔴 阻塞 | 余额不足，图像/音乐/TTS 增强层全部无法验证 |
 | 问卷调研 | ⚠️ 未做 | 「问题与用户洞察 25 分」需要证据支撑 |

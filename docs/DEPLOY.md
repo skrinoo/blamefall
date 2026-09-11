@@ -292,3 +292,37 @@ $env:BLAMEFALL_API_KEY  = '<密钥>'
 | [`.env.example`](../.env.example) | 环境变量模板（不含真值，必须提交） |
 | [`scripts/dev-server.ps1`](../scripts/dev-server.ps1) | 本地开发服务器（MOCK / PROXY） |
 | [`scripts/smoke-test.ps1`](../scripts/smoke-test.ps1) | 29 条断言，本地与生产通用 |
+
+---
+
+## 8. 大陆可达性：为什么必须双链接
+
+2026-09-12 实测，`*.vercel.app` 在大陆网络被**双层封锁**：
+
+| 层 | 现象 | 判定方法 |
+|---|---|---|
+| DNS | `blamefall.vercel.app` 解析出 `2a03:2880:*:face:b00c:*`（Meta 段）与 `199.96.58.x`（Twitter 段）；**查 8.8.8.8 / 1.1.1.1 也被中途伪造** | `Resolve-DnsName -Server 8.8.8.8` |
+| SNI | 直连 Vercel 真 IP `76.76.21.21:443` TCP 通，但 TLS 握手在 ClientHello 带 SNI 时被 RST 强断 | 手写 `SslStream.AuthenticateAsClient` 探针 |
+
+2026-09-11 拿到的 200 是窗口期。**评委大概率在大陆网络，单挂 vercel 链接等于赌运气。**
+
+### 保底链接：GitHub Pages 镜像
+
+仓库 Settings → Pages → Deploy from a branch → `main` / `/ (root)`。
+`index.html` 全部资源是相对路径，部署在 `/<repo>/` 子路径下直接可用；
+`autoSameOrigin()` 会把 apiBase 指向 github.io 的 origin → `/api/judge` 404 → catch →
+**自动降级本地兜底裁判**，游戏完整可玩，只是「在线裁判」变成本地引擎。
+现地址：`https://skrinoo.github.io/blamefall/`。
+
+坑：**Pages 只在 push 时触发构建**。push 之后才开的 Pages 会永远 builds=0 一直 404，
+补一次 `git commit --allow-empty` 再 push 即可。
+
+### AI 完整版：Vercel 自定义域名
+
+自定义域名能绕封的原理：DNS 污染与 SNI 黑名单都按**域名**匹配，
+换成不在名单上的自有域名，两层同时绕过；Vercel 边缘 IP 本身不在 IP 黑名单里。
+
+1. Vercel → 项目 → Settings → Domains → 填 `blamefall.<你的域名>`
+2. 域名商后台加 `CNAME  blamefall  →  cname.vercel-dns.com`
+3. Vercel 自动签 Let's Encrypt 证书；签发后客户端 `autoSameOrigin()` 直接用新域名，**代码零改动**
+4. 验证（在被封的机器上 = 大陆评委替身）：DNS 应解析到 Vercel 真 IP、SNI 握手应成功、`/api/health?probe=3&budget=1850` 应全绿
