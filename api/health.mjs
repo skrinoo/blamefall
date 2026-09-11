@@ -32,7 +32,8 @@ import {
 } from "./_gateway.mjs";
 
 export const config = {
-  runtime: "nodejs20.x",
+  // 同 judge.mjs：config 里不写 runtime（Vercel 只认 "edge"，
+  // nodejs 值会直接部署失败），Node 版本走项目设置。
   // 与 PROBE_MAX 对齐：3 次 × 上游兜底 6s = 18s < 20s。
   // 别把这两个数改散 —— 超出计划的 maxDuration 上限会直接部署失败。
   maxDuration: 20,

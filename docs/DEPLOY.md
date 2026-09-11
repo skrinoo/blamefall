@@ -77,7 +77,7 @@ git push -u origin main
 | Build Command | **留空**（覆盖掉默认值） |
 | Output Directory | **留空** |
 | Install Command | **留空** |
-| Node.js Version | **20.x**（与 `api/*.mjs` 里 `runtime: "nodejs20.x"` 对应） |
+| Node.js Version | **20.x**（`api/*.mjs` 里**不写** `config.runtime`，Vercel 只认 `"edge"`，nodejs 值会直接部署失败；版本只在这里控） |
 
 本项目没有 `package.json`、没有构建步骤、没有依赖。
 任何一处填了东西都可能让 Vercel 去跑一个不存在的 `npm install` 然后失败。
@@ -176,6 +176,7 @@ AI 裁判返回 S=xx · <手法名>
 | 同上 | `probe.errorCodes: ["timeout"]` | 上游超过 6s | 调大 `BLAMEFALL_UPSTREAM_TIMEOUT`，同时检查 `maxDuration` 是否还够 |
 | 同上，但 health 全绿 | `latencyMs.median > 1350` | 网关比预算慢 | 见下一节调预算 |
 | 部署直接失败 | — | `maxDuration` 超出计划上限 | Hobby 计划下调 `api/health.mjs` 的 `maxDuration`，并同步改 `vercel.json` |
+| 部署日志 `unsupported "runtime" value in \`config\`` | —（部署阶段就失败，没有 health 可读） | `api/*.mjs` 的 `export const config` 里写了 `runtime: "nodejs20.x"` | 删掉 `runtime` 键，只留 `maxDuration`；Node 版本走项目设置。2026-09-11 首次部署实测命中 |
 
 ---
 
