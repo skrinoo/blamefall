@@ -1048,3 +1048,17 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 **验证**：浏览器同步链路全绿（弹窗开闭与开关持久化 / Esc 层级 / 设置叠在暂停遮罩上层 / 回标题与新一局重置 / 过滤关时抓锅零分区）；暂停冻结实测受限于测试标签页在用户 Edge 中 hidden（rAF 停摆），按用户指示改**逻辑自检**：8 锚点逐一核对（freshState.paused / 三处 cast gate / 三处遮罩重置 / 握持中途立即生效）+ keydown 层级 + busy 拒绝 + z-index 层级（设置 60 > 暂停 50 > ⏸ 30）；smoke 45/45 无回归。玩家在可见标签页玩时，暂停=世界冻结是闸门行的直接推论。
 
 **改动清单**：`index.html`（设置搬弹窗 + ⏸ 按钮 + 暂停遮罩 + 设置弹窗 DOM）；`game.js`（castFilter 状态与三处 gate / 暂停三件 / keydown 层级 / 弹窗绑定 / 红点）；`style.css`（弹窗与暂停样式）。
+
+## 20. 新 NPC「宿管阿姨」：宿舍管理锅有了真落点（2026-09-12）
+
+**动机（用户提议）**：AI 锅实测高频涉及宿舍管理（卫生/晚归/大功率电器/水电收缴），但旧名单无人可甩——v2 提示词里宿管阿姨甚至被写成「只能当背景板」的角色。把她扶正为第 15 个 NPC。
+
+**数值设计**：难度居中（difficulty 1.4）——比辅导员硬（宿舍的事她真管得着），比导师软（登记簿对了她就认）。baseAcceptance 45 / prefers 事实型（只认值班登记簿）/ dislikes 荒诞型+反向型 / reflectChance 0.15（偶尔把「这归你们自己管」扔回来）。不加 scene 硬锁：相关性交给 cast 软过滤，避免重蹈「前任锁场景形同废号」的覆辙。
+
+**六处联动**：① `data/npcs.js` 插入 suguan（🗝️，食堂阿姨与前任之间）；② `engine/potgen.js` + ③ `api/genpot.mjs` 同源 CAST_IDS 白名单 14→15；④ `prompts/genpot-v2.txt` 名单加 suguan、cast 规则新增「宿舍管理四事项（卫生检查/晚归登记/大功率电器/水电收缴）时 suguan 进 cast」、背景板例句里删掉宿管阿姨（她已可甩）；⑤ `data/pots.js` 三口宿舍生活锅（trash/electric/noise）cast 各加 suguan；⑥ `data/verdicts.js` 补 5 条专属台词（值班簿对账/邻里苦情牌/制度上推法/失职反扣法/玄学扰民说，第一人称 ≤20 字），判定库 54→59 条（标题屏计数由 updateMetaMode 动态算，无需手改）。
+
+**零代码路径**：game.js / judge.js / fallback.js 一行未动——NPC 栏、键盘 1-9 取模、查表回落、cast 软过滤、裁判链路全部数据驱动，新角色即插即用。
+
+**验证（浏览器同步链路实测，AI 关走查表）**：数据层 NPCS.length=15 / 判定库 59 条含 suguan 五键 / 三宿舍锅 cast 含 suguan；交互层 chips=15（开局后）/ 宿管阿姨 idx=8；甩锅实测：抓 MOCK 锅点宿管→事实型→甩锅成功 +140 分（=100×1.4 精确）、technique「值班簿对账」、verdict、reaction「本子上确实漏记了一笔……行，这锅我背。」三段全弹出。smoke 45/45 无回归。
+
+**改动清单**：`data/npcs.js`；`engine/potgen.js`；`api/genpot.mjs`；`prompts/genpot-v2.txt`；`data/pots.js`；`data/verdicts.js`。服务端白名单+提示词变更随 push 触发 Vercel 重新部署生效。

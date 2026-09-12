@@ -24,8 +24,8 @@
 
   var TYPES = ["事实型", "情感型", "转移型", "反向型", "荒诞型"];
   var ROLES = { self: 1, npc: 1, institution: 1, any: 1 };
-  // cast 白名单，与 api/genpot.mjs 的 CAST_IDS、data/npcs.js 的 14 个 id 同源。
-  var CAST_IDS = { didi: 1, roommate: 1, moyu: 1, xuezhang: 1, daoshi: 1, jiaowu: 1, fudaoyuan: 1, shitang: 1, ex: 1, tianqi: 1, shuini: 1, xingzuo: 1, future_self: 1, past_self: 1 };
+  // cast 白名单，与 api/genpot.mjs 的 CAST_IDS、data/npcs.js 的 15 个 id 同源。
+  var CAST_IDS = { didi: 1, roommate: 1, moyu: 1, xuezhang: 1, daoshi: 1, jiaowu: 1, fudaoyuan: 1, shitang: 1, suguan: 1, ex: 1, tianqi: 1, shuini: 1, xingzuo: 1, future_self: 1, past_self: 1 };
 
   var HIGH = 6;        // 缓冲高水位：达到就不再预取（省 token）
   var LOW = 3;         // 低水位：next() 后低于它就后台补。补得早，慢生成才追得上快甩

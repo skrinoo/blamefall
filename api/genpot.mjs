@@ -38,8 +38,8 @@ export const config = {
 const PROMPT_REL = "../prompts/genpot-v2.txt";
 const TYPES = ["事实型", "情感型", "转移型", "反向型", "荒诞型"];
 const ROLES = new Set(["self", "npc", "institution", "any"]);
-// cast / ownershipOverride 的合法 npcId 白名单，必须与 data/npcs.js 的 14 个 id 同源。
-const CAST_IDS = new Set(["didi", "roommate", "moyu", "xuezhang", "daoshi", "jiaowu", "fudaoyuan", "shitang", "ex", "tianqi", "shuini", "xingzuo", "future_self", "past_self"]);
+// cast / ownershipOverride 的合法 npcId 白名单，必须与 data/npcs.js 的 15 个 id 同源。
+const CAST_IDS = new Set(["didi", "roommate", "moyu", "xuezhang", "daoshi", "jiaowu", "fudaoyuan", "shitang", "suguan", "ex", "tianqi", "shuini", "xingzuo", "future_self", "past_self"]);
 
 // 生成上游比判定慢，给它比 judge 更长的兜底超时（客户端不阻塞，无所谓等）。
 const GEN_TIMEOUT_MS = Number(process.env.BLAMEFALL_GEN_TIMEOUT) || 22000;

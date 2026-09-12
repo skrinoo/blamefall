@@ -12,14 +12,14 @@
 （为什么锁死枚举：旧版让你自由发挥场景，结果你造出「食堂排队」「食堂用餐」这种同义碎片，还几乎从不生成「情感社交」，导致「前任」这个 NPC 永远接不到锅、形同废号。固定枚举让场景可映射、让每个 NPC 都有出头机会。场景只是归类标签，同一场景下的具体事件仍任你发挥。）
 
 # cast（必填，2~5 个）——声明这口锅「牵扯到谁」
-从下面 14 个真实 NPC 里，选出在这口锅的场景中**真会出现、玩家真能甩**的角色 id：
-didi（学弟学妹）, roommate（室友）, moyu（摸鱼组员）, xuezhang（社团学长）, daoshi（导师）, jiaowu（教务处）, fudaoyuan（辅导员）, shitang（食堂阿姨）, ex（前任）, tianqi（天气）, shuini（水逆）, xingzuo（星座）, future_self（未来的自己）, past_self（过去的自己）
+从下面 15 个真实 NPC 里，选出在这口锅的场景中**真会出现、玩家真能甩**的角色 id：
+didi（学弟学妹）, roommate（室友）, moyu（摸鱼组员）, xuezhang（社团学长）, daoshi（导师）, jiaowu（教务处）, fudaoyuan（辅导员）, shitang（食堂阿姨）, suguan（宿管阿姨）, ex（前任）, tianqi（天气）, shuini（水逆）, xingzuo（星座）, future_self（未来的自己）, past_self（过去的自己）
 
 cast 规则：
 - 每条理由真正「甩给谁」，必须能在 cast 里找到落点，或明确是 self（怪自己）/ institution（怪制度）/ any（泛化）。
-- 理由的**情境**可以丰富（可以提宿管阿姨、教授、学姐、隔壁寝室当背景或借口），但**核心指控**不要落在一个 cast 之外、玩家根本甩不到的人身上。
+- 理由的**情境**可以丰富（可以提教授、学姐、隔壁寝室当背景或借口），但**核心指控**不要落在一个 cast 之外、玩家根本甩不到的人身上。
 - ex（前任）只在情感 / 关系相关的锅里才放进 cast；tianqi / shuini / xingzuo（天气 / 水逆 / 星座）与 future_self / past_self（未来的自己 / 过去的自己）几乎适用于任何锅，可作兜底。
-- 宿舍生活类的锅，roommate 几乎必须在 cast 里；小组作业类通常有 moyu；社团活动类通常有 xuezhang。
+- 宿舍生活类的锅，roommate 几乎必须在 cast 里；涉及宿舍管理（卫生检查 / 晚归登记 / 大功率电器 / 水电收缴）时 suguan 也进 cast；小组作业类通常有 moyu；社团活动类通常有 xuezhang。
 
 # targetRole（五类型各自「在怪谁」）
 - self：把锅扣在说话人自己身上（认错、自嘲、认命）。这类理由甩给任何 NPC 都等于「接锅」。
@@ -56,7 +56,7 @@ cast 规则：
 }
 
 # ownershipOverride 与 cast 的合法 npcId（只能用这些键，写别的会被丢弃）
-didi, roommate, moyu, xuezhang, daoshi, jiaowu, fudaoyuan, shitang, ex, tianqi, shuini, xingzuo, future_self, past_self
+didi, roommate, moyu, xuezhang, daoshi, jiaowu, fudaoyuan, shitang, suguan, ex, tianqi, shuini, xingzuo, future_self, past_self
 
 # 数量与格式
 用户会说明要几口锅（1~5）。就生成那么多，放进一个数组。确保 JSON 合法：双引号、无尾逗号、无注释、字符串内如需引号用中文引号。

@@ -66,7 +66,7 @@
       weight: 1.0,
       tutorial: true,
       ownershipOverride: { roommate: 0.6, didi: 0.0, daoshi: 0.0, moyu: 0.0 },
-      cast: ["roommate", "fudaoyuan"],
+      cast: ["roommate", "fudaoyuan", "suguan"],
       options: {
         "事实型": "这周我值了两次日，你一次都没值",
         "情感型": "我今天真的累到不想动",
@@ -81,7 +81,7 @@
       text: "宿舍电费超了 200 块，没有任何人承认自己开了空调。",
       weight: 0.8,
       ownershipOverride: { roommate: 0.5, jiaowu: 0.4, didi: 0.0 },
-      cast: ["roommate", "jiaowu"],
+      cast: ["roommate", "jiaowu", "suguan"],
       options: {
         "事实型": "电表读数和你的作息完全对得上",
         "情感型": "我这月生活费已经见底了",
@@ -96,7 +96,7 @@
       text: "凌晨三点，有人在外放短视频。",
       weight: 0.8,
       ownershipOverride: { roommate: 0.8, fudaoyuan: 0.2, didi: 0.0 },
-      cast: ["roommate", "fudaoyuan"],
+      cast: ["roommate", "fudaoyuan", "suguan"],
       options: {
         "事实型": "我录下来了，时间戳是 3:07",
         "情感型": "我明天八点有考试",

@@ -203,6 +203,27 @@
       desc: "无辜。甩给她时裁判点评会变得温柔，反而更让人内疚"
     },
     {
+      // 宿舍生活类锅的高频落点（AI 锅实测常涉及宿舍管理，但旧名单无人可甩）。
+      // 难度居中：比辅导员硬（她真管得着），比导师软（登记簿对了她就认）。
+      id: "suguan",
+      name: "宿管阿姨",
+      glyph: "\uD83D\uDDDD\uFE0F",
+      baseAcceptance: 45,
+      fatigueStep: 6,
+      relationInit: 75,
+      relationStep: -10,
+      coldWarAt: 25,
+      difficulty: 1.4,
+      potOwnership: 0.3,
+      moralCost: "中",
+      prefers: ["事实型"],
+      dislikes: ["荒诞型", "反向型"],
+      reflectChance: 0.15,
+      kind: "normal",
+      scene: null,
+      desc: "宿舍楼规则守护者，只认值班登记簿不认人；吃事实型，不吃胡闹"
+    },
+    {
       id: "ex",
       name: "前任",
       glyph: "\uD83D\uDC94",
