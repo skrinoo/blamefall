@@ -1262,6 +1262,26 @@
              " -> P=" + r.P + "（预期 " + c.expect + "）" + (ok ? " OK" : " 偏差") +
              " · " + (r.success ? "成功" : "失败"), ok ? "ok" : "no");
     });
+    // fit 专项自检：上面四个 P 用例注入了 S，走不到 computePersuasiveness，测不到契合度。
+    // 这里直接调 Detailed，验证「理由目标角色 ↔ 甩锅对象角色」的加/减/中性三条路径。
+    try {
+      var fitCases = [
+        { pot: "late", npc: "roommate", arg: "反向型", want: "契合对象" },   // npc→npc 命中 +8
+        { pot: "late", npc: "roommate", arg: "事实型", want: "错配对象" },   // self→npc 错配 -12
+        { pot: "late", npc: "roommate", arg: "荒诞型", want: null }          // any 中性，无 fit 行
+      ];
+      fitCases.forEach(function (fc) {
+        var p = potById[fc.pot], np = byId[fc.npc];
+        var d = FallbackEngine.computePersuasivenessDetailed(
+          p.options[fc.arg], fc.arg, np, p, ARGUMENT_TYPES, { catchCredit: 9 });
+        var tr = d.trace.join("|");
+        var hit = fc.want
+          ? tr.indexOf(fc.want) >= 0
+          : (tr.indexOf("契合对象") < 0 && tr.indexOf("错配对象") < 0);
+        devLog("  fit · " + fc.npc + " · " + fc.arg + " -> " + (fc.want || "中性") +
+               (hit ? " OK" : " 偏差"), hit ? "ok" : "no");
+      });
+    } catch (e) { devLog("  fit 自检异常：" + e.message, "no"); }
     devLog("引擎自检结束 · 判定库 " + Object.keys(VERDICTS.entries).length + " 条 / 通用兜底 " +
            Object.keys(VERDICTS.generic).length + " 类", "dim");
   }

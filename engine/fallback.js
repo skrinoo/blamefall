@@ -45,6 +45,46 @@
   // （判定引擎调用它时它必须已经可用）。
   var REVERSE_UNLOCK = 3;
 
+  // ── 契合度 fit：理由的「目标角色」是否对上甩锅对象 ──────────────
+  // 每个快速理由都隐含一个「它在怪谁」：怪自己(self)、怪某个具体的人(npc)、
+  // 怪制度/无主体外部力(institution)、或谁都能圆的泛化(any)。
+  // 把它甩给角色不符的对象，就是玩家吐槽的「甩给室友的理由其实在怪自己」。
+  // 命中给 FIT_MATCH，错配给 FIT_MISMATCH，any 永远中性（不挑对象）。
+  var FIT_MATCH = 8;
+  var FIT_MISMATCH = -12;
+
+  // 论证类型 → 默认目标角色。绝大多数锅符合这个先验；
+  // 个别偏离的在 pots.js 里用 pot.targetRole[type] 覆盖（生成锅则整体由 AI 标注）。
+  var TYPE_DEFAULT_ROLE = {
+    "事实型": "npc",          // 摆事实通常在指认「对方」
+    "情感型": "self",         // 诉诸情感通常在陈述「我」的处境
+    "转移型": "institution",  // 转移矛盾通常推给制度/流程/无主体
+    "反向型": "npc",          // 反将一军通常点名「是你/他」
+    "荒诞型": "any"           // 荒诞甩锅是解压阀，不挑对象
+  };
+
+  // normal 类 NPC 里唯一的「机构」是教务处；辅导员/食堂阿姨/导师/学长/前任/室友/学弟/摸鱼组员都是「人」。
+  // abstract（天气/水逆/星座）= 无主体外部力 = institution；self（过去/未来的自己）= self。
+  var NPC_INSTITUTION = { jiaowu: 1 };
+
+  function roleOfNpc(npc) {
+    if (!npc) return null;
+    if (npc.kind === "self") return "self";
+    if (npc.kind === "abstract") return "institution";
+    return NPC_INSTITUTION[npc.id] ? "institution" : "npc";
+  }
+
+  // 理由的目标角色：生成锅/已标注锅用 pot.targetRole[type]，否则用类型默认。
+  function reasonRoleOf(pot, argType) {
+    if (pot && pot.targetRole && pot.targetRole[argType]) return pot.targetRole[argType];
+    return TYPE_DEFAULT_ROLE[argType] || "any";
+  }
+
+  function fitOf(reasonRole, npcRole) {
+    if (!reasonRole || reasonRole === "any" || !npcRole) return 0;
+    return reasonRole === npcRole ? FIT_MATCH : FIT_MISMATCH;
+  }
+
   /**
    * 给自由输入判定论证类型。
    * 按关键词命中数取最高，全部为 0 时退化为「事实型」（最中性的默认值）。
@@ -95,6 +135,23 @@
       }
     }
     if (specific) { s += 10; trace.push("援引具体事实 +10"); }
+
+    // 契合度 fit：仅对「快速选项」生效——此时理由文本 === pot.options[argType]，
+    // 它的目标角色是确定的（pot.targetRole 标注或类型默认）。自由输入的文本角色
+    // 无法可靠判定，fit 保持中性，交给 AI 裁判（热路径）或不管（冷路径兜底）。
+    var isQuickThrow = pot && pot.options &&
+      Object.prototype.hasOwnProperty.call(pot.options, argType) &&
+      pot.options[argType] === text;
+    if (isQuickThrow && npc) {
+      var rRole = reasonRoleOf(pot, argType);
+      var nRole = roleOfNpc(npc);
+      var fit = fitOf(rRole, nRole);
+      // 不为「偏好」开口子：prefers 给的是 A 侧 +15（P +6），足以抵消 fit 的 S 侧 −12（P −4.8），
+      // 吃软乎的对象（前任/学弟学妹）照样接得住情感型；但错配的 −12 保留，
+      // 才能让「对上的理由」得分高于「错位的理由」——这正是 fit 要给的相对信号。
+      if (fit > 0) { s += fit; trace.push("契合对象(" + rRole + "→" + nRole + ") +" + fit); }
+      else if (fit < 0) { s += fit; trace.push("错配对象(" + rRole + "→" + nRole + ") " + fit); }
+    }
 
     // NPC 偏好 / 反感
     if (npc) {
@@ -229,6 +286,12 @@
     computePersuasivenessDetailed: computePersuasivenessDetailed,
     extractKeywords: extractKeywords,
     lookup: lookup,
+    roleOfNpc: roleOfNpc,
+    reasonRoleOf: reasonRoleOf,
+    fitOf: fitOf,
+    TYPE_DEFAULT_ROLE: TYPE_DEFAULT_ROLE,
+    FIT_MATCH: FIT_MATCH,
+    FIT_MISMATCH: FIT_MISMATCH,
     SHIRK_WORDS: SHIRK_WORDS
   };
 });
