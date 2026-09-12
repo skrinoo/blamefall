@@ -418,9 +418,12 @@ try {
                     service   = 'blamefall-judge-devserver'
                     mode      = if ($proxy) { 'proxy' } else { 'mock' }
                     gateway   = [ordered]@{
-                        configured      = [bool]$proxy
-                        baseConfigured  = [bool]$gwBase
-                        keyConfigured   = [bool]$gwKey
+                        # MOCK 模式模拟「作者兜底已配置」：blank key 也能拿到 mock AI，
+                        # 所以 mock 下 base/key 报 true，让客户端 badge 与真实行为一致；
+                        # proxy 模式则如实报 env 有没有配。
+                        configured      = $true
+                        baseConfigured  = if ($proxy) { [bool]$gwBase } else { $true }
+                        keyConfigured   = if ($proxy) { [bool]$gwKey } else { $true }
                         model           = if ($proxy) { $gwModel } else { 'mock' }
                         temperature     = 0.85
                         mockLatencyMs   = $MockLatencyMs

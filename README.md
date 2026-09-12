@@ -153,7 +153,24 @@ api/probe.mjs       GET/POST /api/probe：拿玩家的 key+model 真调一句极
 
 ### 自带 API Key 与选模型（可选）
 
-标题屏有一块「AI 裁判 / 生成锅」设置区，玩家可填自己的网关 Key 和模型 ID：
+标题屏有一块「AI 裁判 / 生成锅」设置区：**一个 AI 总开关** + 玩家可填自己的网关 Key 和模型 ID。
+开关与 Key 的组合决定了「是不是 AI 版、token 记谁账上」：
+
+| AI 开关 | Key | 实际版本 | token 记在 |
+|---|---|---|---|
+| 关 | 任意 / 留空 | 无 AI 判定 + 无 AI 生成锅（纯本地兜底 + 静态锅） | 不消耗任何 token |
+| 开 | 留空 | 有 AI 判定 + AI 生成锅（作者兜底） | 作者网关账户 |
+| 开 | 填了 | 有 AI 判定 + AI 生成锅（玩家凭据） | 玩家网关账户 |
+
+开关存 `localStorage`（`bf.aiEnabled`）。关闭时 `isOnline()` 恒 false：judgeFree 直接 null、PotGen 不预取、
+**不发任何 AI 网络请求**（浏览器实测 fetch 调用数 0）。
+
+> **badge 说真话（本次修复的 bug）**：静态宿主（GitHub Pages）没有 `/api/*`，旧版只看「http 同源」就谎报
+> 「热路径 · 作者兜底 Key」，而实际每个 AI 请求都 404、静默退化成无 AI 版。现在开机先 `GET /api/health`
+> （**不带任何凭据**）探测后端真伪与作者有没有配 key，badge 据此显示真实状态
+> （如「该部署无后端 · 本地兜底 + 静态锅」「后端在 · 无作者 Key（需自填）」）。
+
+其余细节：
 
 - **Key 记在自己账上**：填了之后，`/api/judge`、`/api/genpot`、`/api/probe` 的请求会带上
   `x-bf-key` / `x-bf-model` 头，服务端 `gatewayConfig(req)` 优先用请求级凭据，token 消耗记在玩家自己的网关账户；

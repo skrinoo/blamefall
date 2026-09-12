@@ -1209,42 +1209,90 @@
    * 填过保存后就不再打扰。留空也能玩（离线兜底 / 作者 env key 兜底）。
    */
   function initAiSet() {
-    var keyEl = $("ai-key"), modelEl = $("ai-model");
+    var keyEl = $("ai-key"), modelEl = $("ai-model"), onEl = $("ai-on");
     if (!keyEl) return;
     keyEl.value = JudgeAPI.cfg.apiKey || "";
     modelEl.value = JudgeAPI.cfg.model || "";
+    if (onEl) onEl.checked = !!JudgeAPI.cfg.aiEnabled;
     refreshAiStatus();
 
     var stored = false;
     try { stored = !!localStorage.getItem("bf.apiKey"); } catch (e) { /* ignore */ }
     $("ai-set").classList.toggle("first-run", !stored);
     if (!stored) {
-      setAiHint("首次打开：可填自己的网关 Key（token 记你账上）；留空也能玩（离线/作者兜底）。", "");
+      setAiHint("首次打开：可填自己的网关 Key（token 记你账上）；留空=用作者兜底（需开关开启）。", "");
     }
+
+    // AI 总开关：关=纯本地版（无 AI 判定/无 AI 生成锅，留空即无 AI 版）；
+    // 开+留空=作者兜底 key（消耗作者 token）；开+填 key=消耗玩家 token。
+    if (onEl) onEl.addEventListener("change", function () {
+      JudgeAPI.setAiEnabled(onEl.checked);
+      applyAiGate();
+      if (onEl.checked) recheckAi();
+      setAiHint(onEl.checked
+        ? "已开启 AI 功能：留空用作者兜底 Key，填 Key 用你自己的。"
+        : "已关闭 AI：纯本地判定 + 静态锅，不发任何 AI 请求。", onEl.checked ? "ok" : "");
+    });
 
     $("ai-save").addEventListener("click", function () {
       JudgeAPI.setCredentials(keyEl.value, modelEl.value);
       $("ai-set").classList.remove("first-run");
       refreshAiStatus();
+      recheckAi();
       setAiHint("已保存到本机浏览器，下次打开不再询问。", "ok");
     });
     $("ai-clear").addEventListener("click", function () {
       JudgeAPI.setCredentials("", "");
       keyEl.value = ""; modelEl.value = "";
       refreshAiStatus();
-      setAiHint("已清除，回落服务端默认。", "");
+      recheckAi();
+      setAiHint("已清除，回落作者兜底（需开关开启）。", "");
     });
     $("ai-probe").addEventListener("click", probeAI);
+    applyAiGate();
+  }
+
+  /** 按 AI 开关启用/禁用凭据输入与按钮，并刷新 badge。 */
+  function applyAiGate() {
+    var on = !!JudgeAPI.cfg.aiEnabled;
+    var ids = ["ai-key", "ai-model", "ai-probe", "ai-save", "ai-clear"];
+    for (var i = 0; i < ids.length; i++) { var e = $(ids[i]); if (e) e.disabled = !on; }
+    var box = $("ai-set"); if (box) box.classList.toggle("off", !on);
+    refreshAiStatus();
+    updateMetaMode();
+  }
+
+  /** 重新探测后端真伪并刷新所有状态文案。 */
+  function recheckAi() {
+    return JudgeAPI.checkBackend().then(function () {
+      refreshAiStatus();
+      updateMetaMode();
+    });
   }
 
   function refreshAiStatus() {
     var st = $("ai-status");
     if (!st) return;
-    var hasKey = !!JudgeAPI.cfg.apiKey;
-    st.textContent = JudgeAPI.isOnline()
-      ? ((hasKey ? "用自己的 Key" : "作者兜底 Key") + " · " + (JudgeAPI.cfg.model || "默认模型"))
-      : "离线兜底";
-    st.className = "ai-status" + (JudgeAPI.isOnline() ? " ok" : "");
+    var cfg = JudgeAPI.cfg, b = cfg.backend, hasKey = !!cfg.apiKey;
+    if (!cfg.aiEnabled)  { st.textContent = "AI 已关闭 · 本地兜底 + 静态锅"; st.className = "ai-status"; return; }
+    if (!cfg.apiBase)    { st.textContent = "离线兜底"; st.className = "ai-status"; return; }
+    if (b && !b.present) { st.textContent = "该部署无后端 · 本地兜底 + 静态锅"; st.className = "ai-status"; return; }
+    if (hasKey)          { st.textContent = "用自己的 Key · " + (cfg.model || "默认模型"); st.className = "ai-status ok"; return; }
+    if (b && b.present && !b.authorKey) { st.textContent = "后端在 · 无作者 Key（需自填）"; st.className = "ai-status"; return; }
+    st.textContent = "作者兜底 Key · " + (cfg.model || "默认模型");
+    st.className = "ai-status ok";
+  }
+
+  /** 标题屏底部模式 badge：必须与「实际会不会走 AI」一致，不许谎报热路径。 */
+  function updateMetaMode() {
+    var el = $("meta-mode");
+    if (!el) return;
+    var n = Object.keys(VERDICTS.entries).length;
+    var cfg = JudgeAPI.cfg, b = cfg.backend;
+    if (!cfg.aiEnabled) { el.textContent = "AI 已关闭 · 判定库 " + n + " 条 + 静态锅库"; return; }
+    if (JudgeAPI.isOnline()) { el.textContent = "热路径 · AI 判定 + AI 生成锅 · " + cfg.apiBase; return; }
+    if (cfg.apiBase && b && !b.present) { el.textContent = "冷路径（该部署无 /api 后端）· 判定库 " + n + " 条 + 静态锅库"; return; }
+    el.textContent = "冷路径 · 判定库 " + n + " 条 + 静态锅库 · 断网可玩";
   }
 
   function setAiHint(msg, cls) {
@@ -1257,6 +1305,7 @@
   /** 点「检测」：拿当前输入的 key/model 真调一次 /api/probe，把结论翻译成提醒。 */
   function probeAI() {
     var keyEl = $("ai-key"), modelEl = $("ai-model");
+    if (!JudgeAPI.cfg.aiEnabled) { setAiHint("AI 功能已关闭，先打开上面的开关再检测。", "bad"); return; }
     var base = JudgeAPI.cfg.apiBase;
     if (!base) { setAiHint("离线模式没有可检测的端点，部署到 Vercel 后才能检测。", "bad"); return; }
     setAiHint("检测中…", "");
@@ -1312,13 +1361,15 @@
     loadFreeTimer(); syncFreeTimerUI();
     initAiSet();
 
-    var n = Object.keys(VERDICTS.entries).length;
-    var hot = JudgeAPI.isOnline();
-    $("meta-mode").textContent = hot
-      ? ("热路径 · AI 判定 + AI 生成锅 · " + JudgeAPI.cfg.apiBase)
-      : ("冷路径 · 判定库 " + n + " 条 + 静态锅库 · 断网可玩");
-    // 热路径：开机就后台预取一批 AI 锅，给第一局提前暖缓冲（失败/超时不影响静态锅）。
-    if (hot && typeof PotGen !== "undefined") PotGen.prefetch(3);
+    updateMetaMode();
+    // 先探测后端真伪（静态宿主无 /api），再决定热路径预取与 badge 文案，
+    // 避免把「无后端」谎报成「作者兜底」。探测本身不带凭据。
+    JudgeAPI.checkBackend().then(function () {
+      refreshAiStatus();
+      updateMetaMode();
+      // 热路径：确认有后端才后台预取 AI 锅暖缓冲（失败/超时不影响静态锅）。
+      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(3);
+    });
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，
     // 这样评审现场按一下 ` 就能看见判定引擎是真的在算，不是写死的动画。

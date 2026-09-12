@@ -48,6 +48,16 @@
     apiKey: "",
     model: "",
 
+    // 是否启用 AI 功能（AI 判定 + AI 生成锅）。标题屏开关、localStorage(bf.aiEnabled) 持久化。
+    // 关闭时 isOnline() 恒 false：judgeFree 直接 null、PotGen 不预取、不发任何 AI 请求，
+    // 即「无 AI 判定 + 无 AI 生成锅」的纯本地版本（此时留空 = 无 AI 版）。
+    aiEnabled: true,
+
+    // 后端能力探测结果（checkBackend() 异步填充）：{ present, authorKey }；null = 未探测。
+    // 让标题屏 badge 说真话：静态宿主（GitHub Pages）没有 /api/*，「http 同源」的意图
+    // ≠ 真有后端；不探测就会把无 AI 版谎报成「作者兜底 Key」（本次修复的 bug）。
+    backend: null,
+
     // 1850 / 2000，不是更早的 1350 / 1500，更不是最初的 800。
     //
     // 2026-09-11 生产实测（gemini-2.5-flash 经 openai-next 网关，
@@ -72,11 +82,23 @@
     if (typeof over.apiBase === "string") CFG.apiBase = over.apiBase.replace(/\/+$/, "");
     if (typeof over.apiKey === "string") CFG.apiKey = over.apiKey.trim();
     if (typeof over.model === "string") CFG.model = over.model.trim();
+    if (typeof over.aiEnabled === "boolean") CFG.aiEnabled = over.aiEnabled;
     if (typeof over.timeout === "number") CFG.timeout = over.timeout;
     if (typeof over.flightMs === "number") CFG.flightMs = over.flightMs;
   }
 
-  function isOnline() { return !!CFG.apiBase; }
+  /** 开关 ON + 有 http origin（部署态）。file:// 或开关关闭都为 false。 */
+  function isEnabled() { return !!CFG.aiEnabled && !!CFG.apiBase; }
+
+  /**
+   * 真的会走 AI 吗 = 开关 ON + http origin + 后端未被证伪。
+   * backend=null（开机未探测）时乐观 true；checkBackend 一旦报 present=false
+   * （静态宿主 /api/health 404）就翻 false，此后不再发任何 AI 请求。
+   */
+  function isOnline() {
+    if (!isEnabled()) return false;
+    return !CFG.backend || !!CFG.backend.present;
+  }
 
   /** 剥掉模型可能违规加上的 markdown 围栏（prompt 已禁止，但仍要防） */
   function stripFence(raw) {
@@ -192,6 +214,7 @@
       if (!ls) return;
       var k = ls.getItem("bf.apiKey"); if (k) CFG.apiKey = k;
       var m = ls.getItem("bf.model"); if (m) CFG.model = m;
+      var ae = ls.getItem("bf.aiEnabled"); if (ae !== null) CFG.aiEnabled = ae !== "0";
     } catch (e) { /* ignore */ }
   })();
 
@@ -208,6 +231,37 @@
       if (CFG.apiKey) ls.setItem("bf.apiKey", CFG.apiKey); else ls.removeItem("bf.apiKey");
       if (CFG.model) ls.setItem("bf.model", CFG.model); else ls.removeItem("bf.model");
     } catch (e) { /* ignore */ }
+  }
+
+  /** 标题屏 AI 开关：写 CFG + localStorage。关闭即纯本地版（不发任何 AI 网络请求）。 */
+  function setAiEnabled(on) {
+    CFG.aiEnabled = !!on;
+    try {
+      var ls = G.localStorage;
+      if (ls) ls.setItem("bf.aiEnabled", CFG.aiEnabled ? "1" : "0");
+    } catch (e) { /* ignore */ }
+    return CFG.aiEnabled;
+  }
+
+  /**
+   * 探测后端是否真的存在（以及作者有没有配兜底 key）。
+   * 刻意**不带任何凭据头**——这只是能力探测，不能把玩家 key 发给健康检查。
+   * 静态宿主（Pages）/api/health 404 → present=false；Vercel 200/503 → present=true，
+   * 并从 health 的 gateway.keyConfigured 读出「作者配没配 env key」。
+   */
+  function checkBackend() {
+    if (!CFG.apiBase) { CFG.backend = { present: false, authorKey: false }; return Promise.resolve(CFG.backend); }
+    var ctrl = null;
+    try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(3500) }; } catch (e) {}
+    return fetch(CFG.apiBase + "/api/health", ctrl || {})
+      .then(function (r) {
+        var present = r.ok || r.status === 503;   // 503 = 后端在但没配 key，仍算「有后端」
+        return r.json().then(function (j) {
+          return { present: present, authorKey: !!(j && j.gateway && j.gateway.keyConfigured) };
+        }).catch(function () { return { present: present, authorKey: false }; });
+      })
+      .catch(function () { return { present: false, authorKey: false }; })
+      .then(function (b) { CFG.backend = b; return b; });
   }
 
   /**
@@ -241,6 +295,9 @@
     stripFence: stripFence,
     applyConfig: applyConfig,
     setCredentials: setCredentials,
+    setAiEnabled: setAiEnabled,
+    checkBackend: checkBackend,
+    isEnabled: isEnabled,
     isOnline: isOnline,
     VALID_TYPES: VALID_TYPES,
     get cfg() { return CFG; }

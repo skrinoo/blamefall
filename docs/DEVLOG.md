@@ -893,3 +893,34 @@ NPC 栏（850–948）留 ~78px 残影，与截图那条完全对上。5 条 AI 
 「✓ 模型可用」/ 坏 Key 401·402·404 三种中文提醒 / 保存落 localStorage / 刷新持久化不打扰 / 清除回落作者兜底）；
 dev-server 日志确认浏览器真实请求 `key=request` + model 覆盖生效；smoke 29→**45/45** 全绿（新增 genpot/probe
 与请求级凭据覆盖断言，含「坏 Key 仍返回 200」「响应不回显 Key 明文」）。
+
+---
+
+## 14. AI 总开关 + 「badge 说真话」：修掉留空却跑到无 AI 版的谎报（2026-09-12）
+
+用户报 bug：留空时启用的**不是**作者兜底 key，而是「无 AI 判定 + 无 AI 生成锅」的版本；并要求加一个
+「是否启用 AI」的开关，把三种组合的语义钉死：关+留空=无 AI 版；开+留空=作者兜底（烧作者 token）；
+开+填 key=烧玩家 token。
+
+**根因（badge 谎报）**：`isOnline()` 旧实现 = `!!apiBase`，而 `apiBase` 在任何 http(s) 同源都会被
+`autoSameOrigin()` 填上。于是**静态宿主（GitHub Pages）也被判成「热路径」**——可 Pages 没有 `/api/*`，
+每个 AI 请求都 404 → `judgeFree` resolve(null) 切本地引擎、`PotGen` 缓冲空落静态锅。功能上「优雅降级」是对的，
+但标题屏 badge 仍写着「热路径 · AI 判定 + AI 生成锅 · 作者兜底 Key」，把无 AI 版谎报成作者兜底版。
+**「http 同源」的意图 ≠ 真有后端**，这就是本次 bug 的全部。
+
+**修复 = 能力探测 + 总开关**：
+
+| 件 | 做法 |
+|---|---|
+| `checkBackend()` | 开机 `GET <base>/api/health`（**刻意不带凭据头**，能力探测不能泄露玩家 key），读 `gateway.keyConfigured` 得 `{present, authorKey}`；Pages 404 → present=false |
+| `isOnline()` 重定义 | `aiEnabled && apiBase && backend 未被证伪`；backend=null 时乐观 true，探测到 present=false 即翻 false，此后不再发任何 AI 请求 |
+| AI 总开关 | 标题屏 checkbox，存 `bf.aiEnabled`；关 → `isOnline()` 恒 false（judgeFree 直接 null、PotGen 不预取、probe/保存/清除按钮禁用） |
+| badge 说真话 | `refreshAiStatus()`/`updateMetaMode()` 按 {aiEnabled, apiBase, backend, hasKey} 显示：AI 已关闭 / 离线兜底 / 该部署无后端 / 后端在·无作者 Key / 作者兜底 / 用自己的 Key |
+
+**安全**：关开关后浏览器实测 `fetch` 调用数 **0**（judgeFree + prefetch 都不发请求）；`checkBackend` 不带
+`x-bf-key`；`base` 仍恒等 env（请求级 base=SSRF，不做）；key 仍只以 `x-bf-key` 形式、且仅在开启+填写时发出。
+
+验证（2026-09-12，本地 MOCK）：开+留空 → badge「作者兜底 Key」+ 热路径；关 → badge「AI 已关闭」、
+`isOnline=false`、`PotGen.enabled=false`、judgeFree=null、prefetch=0、**fetch 调用 0**、输入/检测/保存禁用、
+`bf.aiEnabled=0` 落盘且刷新后保持关；再开 → 回落作者兜底热路径。把 apiBase 指到一个 `/api/health` 404 的地址
+模拟静态宿主 → `present=false`、badge「该部署无后端 · 本地兜底 + 静态锅」（不再谎报作者兜底）。smoke 45/45 无回归。

@@ -164,6 +164,10 @@ kbd {
 .ai-status { font-size: 11px; color: var(--ink-faint); }
 .ai-status.ok { color: var(--good); }
 .ai-status.bad { color: var(--bad); }
+.ai-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-dim); cursor: pointer; user-select: none; }
+.ai-toggle input { width: 15px; height: 15px; accent-color: var(--good); cursor: pointer; flex: none; }
+/* 开关关闭时凭据区变淡，视觉上和「纯本地版」对应 */
+.title-ai.off .ai-row, .title-ai.off .ai-actions { opacity: .45; }
 .ai-row { display: flex; gap: 8px; }
 .ai-row input {
   flex: 1; font-family: inherit; font-size: 12px; color: var(--ink);
