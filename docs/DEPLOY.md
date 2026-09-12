@@ -338,3 +338,24 @@ Vercel 项目名实际是 `Blamefall-yy3a`（创建时 `blamefall` 与全局已�
 它**随项目走**：每次 push 触发重新部署后仍然指向最新生产版本，不会过期。
 09-11 实测过的 `blamefall.vercel.app` 已不在项目域名列表里（释放），
 **不要再写进任何材料** —— 释放后的域名可能被别人注册走。
+
+### 把「间隔复测」固化成一条命令：`scripts/check-links.ps1`
+
+可达性随时在变，README 里手写的「✅ 已上线」写下那一刻就开始过期。
+`check-links.ps1` 把巡检变成命令：实测两条演示链接 → 重写 README 的
+`<!-- LINK-STATUS:START/END -->` 标记块（含巡检时间戳）。
+
+```powershell
+cd blamefall/scripts
+.\check-links.ps1              # 巡检并更新 README
+.\check-links.ps1 -NoUpdate    # 只看结果不改文件
+.\check-links.ps1 -Retries 5   # 不可达时多重试几轮
+```
+
+判定标准与冒烟测试同源——**不看状态码看内容**：
+Vercel 域名要求 `/api/health` 返回 `ok=true`（证明 lambda 活、prompt 加载、网关配置）；
+Pages 要求 body 含 ASCII 标记 `screen-title`（不用中文标记，避开字符集解码坑）。
+不可达时状态列会如实写「本机此刻不可达，不可达 ≠ 挂了」而不是谎报宕机。
+
+链接清单写在脚本顶部的 `$Links`，**是唯一真相**：以后换域名只改这一处，
+README 下次巡检自动跟上。

@@ -177,7 +177,8 @@ blamefall/
 │   ├── prompt-lib-batch.txt 批量生成用的 system prompt（权威副本）
 │   ├── generate-verdicts.ps1 批量生成器
 │   ├── dev-server.ps1      本地开发服务器（无 Node 环境下验证在线链路）
-│   └── smoke-test.ps1      29 条断言，本地与生产通用
+│   ├── smoke-test.ps1      29 条断言，本地与生产通用
+│   └── check-links.ps1     演示链接巡检，自动重写 README 的 LINK-STATUS 状态块
 └── docs/
     ├── DEPLOY.md           部署指南 + 故障对照表
     └── DEVLOG.md           开发日志（人机协作全过程留痕）
@@ -267,8 +268,23 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 | `/api/judge` 服务端 | ✅ 已部署（`blamefall-yy3a.vercel.app`，health 三绿；生产 probe median 1373ms） |
 | 在线链路验证 | ✅ 本地 29/29 断言全绿 + 浏览器端到端实测（见下） |
 | 图像 / 音乐 / TTS 增强 | ⚠️ 未做（可用网关余额不足） |
-| 演示链接（AI 裁判完整版） | `https://blamefall-yy3a.vercel.app/` —— Vercel 项目域名（项目名 `Blamefall-yy3a`，随项目不走样）。⚠️ `*.vercel.app` 在大陆网络被**波浪式间歇封锁**（2026-09-12 封锁波内实测 DNS 污染 + SNI RST；窗口期全绿），见 [`docs/DEPLOY.md`](docs/DEPLOY.md) §8 |
-| 演示链接（保底可玩版） | `https://skrinoo.github.io/blamefall/` —— GitHub Pages 镜像，大陆可达；自由输入自动降级本地兜底裁判，其余体验一致 |
+
+<!-- LINK-STATUS:START -->
+<!-- 本块由 scripts/check-links.ps1 自动维护，勿手改；手改会在下次运行时被覆盖 -->
+
+最近巡检：**2026-09-12 08:27**（本机 = 大陆网络；执行 `scripts/check-links.ps1` 可刷新本块）
+
+| 链接 | 角色 | 状态 |
+|---|---|---|
+| `https://blamefall-yy3a.vercel.app/` | AI 裁判完整版（Vercel 项目域名，随项目不走样） | 🔴 本机此刻不可达（1 轮重试均失败：无法连接到远程服务器）。不可达 ≠ 挂了：封锁是波浪式的，见 DEPLOY §8 |
+| `https://skrinoo.github.io/blamefall/` | 保底可玩版（GitHub Pages 镜像，大陆可达；自由输入自动降级本地兜底裁判） | ✅ 可达（HTTP 200，页面标记命中；attempt 1/1） |
+
+> `*.vercel.app` 在大陆网络被**波浪式间歇封锁**（2026-09-12 封锁波内实测 DNS 污染 + SNI RST；
+> 窗口期全绿），可达性随时在变 —— 状态列只反映**最近一次巡检时刻**的事实，
+> 巡检方法见 [`docs/DEPLOY.md`](docs/DEPLOY.md) §8。
+
+<!-- LINK-STATUS:END -->
+
 
 ### 在线链路验证到什么程度了
 
