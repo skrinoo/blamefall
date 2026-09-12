@@ -423,6 +423,28 @@ try {
                     note      = 'dev-server.ps1 的本地应答，与生产端点 api/*.mjs 同构但不同实现'
                 })
             }
+            elseif ($apiPath -eq '/api/genpot') {
+                # 与 api/genpot.mjs 同构的 mock：让客户端 PotGen 缓冲链路在没网关时也能端到端测。
+                # 两口锅覆盖不同 targetRole，验证 sanitize 与 next() 都走得通。
+                Send-Json $stream 200 'OK' ([ordered]@{
+                    pots = @(
+                        [ordered]@{
+                            id='gen-mock-1'; scene='mock 小组'; weight=1
+                            text='mock 锅一：群文件里那版方案被人改坏了，没人承认。'
+                            options=[ordered]@{ '事实型'='改坏那版的提交记录是他的账号'; '情感型'='我这几天盯着这版眼睛都熬红了'; '转移型'='方案评审本来就没留痕流程'; '反向型'='是他上次说直接覆盖就行'; '荒诞型'='那晚机房跳闸，文件自己坏的' }
+                            targetRole=[ordered]@{ '事实型'='npc'; '情感型'='self'; '转移型'='institution'; '反向型'='npc'; '荒诞型'='any' }
+                            ownershipOverride=[ordered]@{ moyu=0.7; roommate=0.3 }
+                        },
+                        [ordered]@{
+                            id='gen-mock-2'; scene='mock 宿舍'; weight=1
+                            text='mock 锅二：冰箱里那盒牛奶过期三天了没人扔。'
+                            options=[ordered]@{ '事实型'='牛奶是他上周买回来没开封的'; '情感型'='我这周真的一次都没开过冰箱'; '转移型'='值日表压根没写谁清冰箱'; '反向型'='是他让我别动他东西的'; '荒诞型'='咱这冰箱自带时间加速' }
+                            targetRole=[ordered]@{ '事实型'='npc'; '情感型'='self'; '转移型'='institution'; '反向型'='npc'; '荒诞型'='any' }
+                        }
+                    )
+                    requested = 2; returned = 2; latencyMs = 0; model = 'mock'
+                })
+            }
             else {
                 Send-File $stream $path
             }

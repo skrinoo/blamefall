@@ -8,6 +8,10 @@
     "api/health.mjs": {
       "includeFiles": "prompts/**",
       "maxDuration": 20
+    },
+    "api/genpot.mjs": {
+      "includeFiles": "prompts/**",
+      "maxDuration": 30
     }
   }
 }

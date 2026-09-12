@@ -59,12 +59,14 @@ export function gatewayConfig() {
 
 // ── system prompt ───────────────────────────────────────────
 
-// 模块级缓存：serverless 实例存活期间只读一次文件。
+// 模块级缓存（按相对路径分键）：serverless 实例存活期间每个 prompt 只读一次文件。
 // 部署会换实例，所以不存在「改了 prompt 但缓存不刷新」的问题。
-let _promptCache = null;
+const _promptCache = new Map();
 
 /**
- * 读 system prompt。两条候选路径：
+ * 读任意 system prompt 文件（judge-v3.txt / genpot-v1.txt 都走这里）。
+ *
+ * 两条候选路径：
  *   1. 相对本文件（ESM 下用 import.meta.url 解析，部署态最可靠）
  *   2. 相对 process.cwd()（本地 `vercel dev` 或裸 node 跑时的形态）
  *
@@ -73,33 +75,42 @@ let _promptCache = null;
  *
  * 两条路径都失败就返回 null，由调用方决定怎么吵闹 —— 绝不静默降级成
  * 一段内置的简化 prompt。那会造出 prompt 的第二份真相。
+ *
+ * @param {string} rel  相对本文件的 prompt 路径（如 "../prompts/genpot-v1.txt"）
  */
-export async function loadSystemPrompt() {
-  if (_promptCache) return _promptCache;
+export async function loadPrompt(rel) {
+  if (_promptCache.has(rel)) return _promptCache.get(rel);
 
+  const basename = rel.split("/").pop();
   const candidates = [];
   try {
-    candidates.push(fileURLToPath(new URL(PROMPT_REL, import.meta.url)));
+    candidates.push(fileURLToPath(new URL(rel, import.meta.url)));
   } catch (e) {
     /* import.meta.url 不可用时跳过 */
   }
-  candidates.push(path.resolve(process.cwd(), "prompts/judge-v3.txt"));
+  candidates.push(path.resolve(process.cwd(), "prompts", basename));
 
   for (const p of candidates) {
     try {
       let text = await readFile(p, "utf8");
-      // 防御性剥 BOM：提交时本文件是无 BOM 的（Node 需要），
+      // 防御性剥 BOM：提交时 prompt 文件是无 BOM 的（Node 需要），
       // 但若有人用 Windows 记事本改过就会带上 BOM，
       // 那时 \uFEFF 会成为 prompt 的第一个字符，模型行为不可预期。
       text = text.replace(/^\uFEFF/, "").trim();
       if (!text) continue;
-      _promptCache = { text: text, chars: text.length, lines: text.split("\n").length };
-      return _promptCache;
+      const cached = { text: text, chars: text.length, lines: text.split("\n").length };
+      _promptCache.set(rel, cached);
+      return cached;
     } catch (e) {
       /* 试下一条候选路径 */
     }
   }
   return null;
+}
+
+/** 读裁判 system prompt（loadPrompt 的固定参数封装，保持旧调用点不变）。 */
+export async function loadSystemPrompt() {
+  return loadPrompt(PROMPT_REL);
 }
 
 /**

@@ -729,3 +729,37 @@ blamefall/
   否则「不读秒」会在面板一开就生效，连选快速选项的决策压力也没了；
   现在只有真的点进输入框打字才冻结/重置，键盘 1-5 选快速选项时读秒照走。
 - 换目标不再清空已输入的理由（清空移到抓锅时），配合「开面板可点头像换目标」才顺手。
+
+---
+
+## 11. AI 实时生成锅（热/冷双路径）——把「生成」搬到「需要之前」
+
+用户澄清了「AI 实时生成理由」的本意：**每局让 AI 生成锅本身**（连锅的类型、正文、
+五条理由一起），为保流畅先预生成一批、游戏进程中再续生成；热/冷由**是否接入 key** 切换。
+
+这与「AI 不在热路径」的铁律**不冲突**，关键在时序：生成发生在「锅被甩出去之前」的后台，
+甩锅那一刻仍是从缓冲里 0ms 取用。于是「实时生成」= 预取 + 缓冲 + 冷路径兜底，而非临场等网络。
+
+落地件：
+
+| 文件 | 职责 |
+|---|---|
+| `prompts/genpot-v1.txt` | 生成器 system prompt：只吐 JSON 数组；**禁一切数值判定字段**（说服度/接受度/道德代价），`ownershipOverride` 是唯一允许的数值且夹 [0,1]；每条理由必须指向其 `targetRole`（self/npc/institution/any），五类型尽量覆盖不同角色——直接根治 §10 的「理由↔对象错位」 |
+| `api/genpot.mjs` | 薄端点，复用 `_gateway.mjs`。`GET/POST ?n=1..5`；服务端逐口 `sanitizePot`（五类型缺一不可、targetRole 归一、ownership 夹值丢非数值键），坏批吵闹 502/503，绝不静默凑合 |
+| `api/_gateway.mjs` | 抽出通用 `loadPrompt(rel)`（按相对路径分键缓存），`loadSystemPrompt` 委托它——judge 与 genpot 共用同一条上游调用路径，延迟/配置口径一致 |
+| `engine/potgen.js` | 客户端缓冲：`enabled()=JudgeAPI.isOnline()`；`prefetch(n)` 后台取（永不 throw、20s 超时、高水位 4 停取）；`next()` 取一口并在低于低水位 2 时顺手补货；缓冲空→返回 null，调用方落回静态锅池 |
+| `game.js` | `choosePotDef` 在静态加权池**之前**先问 `PotGen.next()`；`boot`/`startGame` 热路径下 `prefetch(3)` 暖缓冲；标题屏 badge 改「热路径 · AI 判定 + AI 生成锅」/「冷路径 · …静态锅库」 |
+| `scripts/dev-server.ps1` | 加 MOCK `/api/genpot`（两口覆盖不同 targetRole 的假锅），让缓冲链路在没网关时也能端到端测 |
+
+**为什么生成锅能直接插进现有引擎**：判定数值不挂在锅上——`ownershipOf` 缺 `ownershipOverride`
+就回落到 NPC 默认 `potOwnership`；快速理由的 S 由 `computePersuasiveness` 对**文本**实算；
+答复查 `VERDICTS[NPC×类型]`。所以一口只有 {scene,text,options,(ownershipOverride),(selfish)} 的
+生成锅是 drop-in 的，`targetRole`/`generated` 是引擎当前忽略的新字段。
+
+验证（2026-09-12）：smoke 29/29 无回归；浏览器实测 `PotGen`——`enabled=true`、`prefetch(3)`
+入缓冲 2 口、`next()` 取出的锅五类型齐全 + targetRole 归一 + ownership 夹值 + 无说服度字段，
+`sanitize` 对缺正文/缺类型/非法角色/非数值 ownership 全部正确拒绝或归一；加载期 console 零报错。
+
+**尚未做**（下一步）：① `targetRole` 已随锅流到前端，但 `computePersuasiveness` 还没吃它——
+契合度 fit（命中 +8 / 错配 −12 进 trace）是把「理由↔对象」闭环的最后一环，需连带平衡扇展重跑；
+② 生产 `/api/genpot` 的真模型热路径待推送后掐表实测（受大陆波浪式封锁影响，需重试）。

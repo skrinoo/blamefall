@@ -215,6 +215,12 @@
       var selfPots = POTS.filter(function (p) { return p.selfish; });
       if (selfPots.length) return pick(selfPots);
     }
+    // 热路径：缓冲里有 AI 预生成的锅就优先用（AI 在后台生成，此刻 0ms 取用，
+    // 不卡锅落地）。缓冲空 / 离线冷路径 / 生成失败 → 自动落回下面的静态锅池，玩家无感。
+    if (typeof PotGen !== "undefined" && PotGen.enabled()) {
+      var gen = PotGen.next();
+      if (gen) return gen;
+    }
     var pool = POTS.filter(function (p) { return S.recentPots.indexOf(p.id) < 0; });
     if (!pool.length) { S.recentPots = []; pool = POTS.slice(); }
     // 加权随机
@@ -1081,6 +1087,8 @@
     $("hud-act").textContent = "第一幕";
     $("hud-act-name").textContent = ACTS[1].name;
     S.nextSpawn = 0.8;
+    // 开局先后台预取一批 AI 锅填缓冲（热路径才发；失败/离线不影响下面的静态锅）。
+    if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(3);
     showScreen("screen-game");
     updateHud();
     refreshNpcBar();
@@ -1201,9 +1209,12 @@
     loadFreeTimer(); syncFreeTimerUI();
 
     var n = Object.keys(VERDICTS.entries).length;
-    $("meta-mode").textContent = JudgeAPI.isOnline()
-      ? ("在线裁判 · " + JudgeAPI.cfg.apiBase)
-      : ("离线模式 · 判定库 " + n + " 条 · 断网可玩");
+    var hot = JudgeAPI.isOnline();
+    $("meta-mode").textContent = hot
+      ? ("热路径 · AI 判定 + AI 生成锅 · " + JudgeAPI.cfg.apiBase)
+      : ("冷路径 · 判定库 " + n + " 条 + 静态锅库 · 断网可玩");
+    // 热路径：开机就后台预取一批 AI 锅，给第一局提前暖缓冲（失败/超时不影响静态锅）。
+    if (hot && typeof PotGen !== "undefined") PotGen.prefetch(3);
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，
     // 这样评审现场按一下 ` 就能看见判定引擎是真的在算，不是写死的动画。
