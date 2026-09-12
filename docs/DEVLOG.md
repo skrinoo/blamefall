@@ -956,3 +956,31 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 抬高，正常「来一个甩一个」的节奏下不再触发。
 
 （README 同步：按约定补上「作者兜底 AI 只在有后端的部署（Vercel）上生效」一句。）
+
+---
+
+## 16. Bug 修复：整局无 AI（缓冲不自愈 + 冷启动误杀，2026-09-12）
+
+**用户复报**：§15 加深缓冲后仍出现「上一把是 AI、点『再来一把』后整局无 AI」「有时开局就无 AI（开关明明勾着）」，
+且确认是 Vercel 链接（有后端）、不是 Pages 无 AI 版。这不是 §15 的浅缓冲问题，是两个更深的洞：
+
+**洞 A —— 缓冲空了不会自愈（`engine/potgen.js`）。** 旧 `next()` 在缓冲为空时直接 `return null`、**不触发 topUp**；
+补货只发生在 boot/startGame 各一次的 `prefetch(5)`、以及「成功 shift 之后」。所以只要开局那次 `prefetch` 失败或还没回来
+（Vercel 冷启动、网关瞬时 5xx、作者额度 402），缓冲就卡在 0，之后每次 `next()` 都返回 null 却从不重试 →
+**整局每一口锅都落静态**。「再来一把」走 `startGame`、不重新探测、也只发一次 prefetch，一次失败就又是一整局静态。
+
+- 浏览器实证（stub 开局 genpot 失败一次、随后健康）：修复前 8 口全 NULL、`genpotCalls=1`（永不重试）；
+  修复后 `next()` 空缓冲也调 `topUp()` → 第 1 口 NULL（热路径不能等）、随后自愈重试 → 7/8 AI、`genpotCalls=5`。
+- 顺带修死循环隐患：`topUp()` 的 while 加了 `online()` 门——离线时 `prefetch` 直接 bail、不增 `inflight`，少了这道门会空转卡死标签页。
+
+**洞 B —— 一次慢探测杀掉整会话 AI（`engine/api.js`）。** 旧 `checkBackend()` 用 `AbortSignal.timeout(3500)`，超时即
+`present=false`；而 `isOnline()` 一旦见 `present=false` 就整会话 false。Vercel serverless `/api/health` 冷启动常 >3.5s →
+开局探测超时 → **整局判成无 AI**（正是「有时开局就无 AI、开关却勾着」）。`checkBackend` 只在 boot/开关/保存时跑，一旦判死不再自愈。
+
+- 修复：超时放宽到 8s + 失败重试一次；**只有 404 才是「确定无后端」**（Pages 秒回 404），收到任何非 404 响应都算后端存在；
+  超时/网络错属「暂时够不着」→ 乐观 `present=true`（AI 照发，真不可用时 judgeFree/genpot 各自 catch 落兜底、无感），
+  并标 `uncertain` 让 badge 显示「后端探测超时 · 仍会尝试 AI（作者兜底）」而不是谎判无后端。
+- 实证：stub `/api/health` 404 → `present=false`（Pages 仍正确判无后端）；stub 4s 冷启动后 200 → `present=true`、`isOnline=true`（旧 3.5s 会误杀）。
+
+**边界（诚实说）**：若作者网关额度真的耗尽（持续 402），自愈重试也变不出锅、仍会落静态——那是 token 供给问题，
+不是客户端能修的；客户端能做的是「只要后端还能出货，就绝不因为一次失败/一次慢探测而整局放弃 AI」。smoke 45/45 无回归。

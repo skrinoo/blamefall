@@ -243,25 +243,45 @@
     return CFG.aiEnabled;
   }
 
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
   /**
    * 探测后端是否真的存在（以及作者有没有配兜底 key）。
    * 刻意**不带任何凭据头**——这只是能力探测，不能把玩家 key 发给健康检查。
-   * 静态宿主（Pages）/api/health 404 → present=false；Vercel 200/503 → present=true，
-   * 并从 health 的 gateway.keyConfigured 读出「作者配没配 env key」。
+   *
+   * 判定原则（修复「冷启动误杀整会话 AI」的关键）：
+   *   · 只有 **404** 才是「确定无后端」——GitHub Pages 静态宿主秒回 404。
+   *   · 收到任何非 404 响应（200/503/5xx）= 后端确实存在（静态宿主不会给这些）。
+   *   · 超时 / 网络错 = 「暂时够不着」，**不是**「无后端」。Vercel 冷启动常要好几秒，
+   *     旧版 3.5s 超时→present=false→isOnline 整会话 false→开局就无 AI，就是这个坑。
+   *     所以放宽到 8s + 失败重试一次；仍够不着就乐观 present=true（AI 照发，
+   *     真不可用时 judgeFree/genpot 各自 catch 落兜底，玩家无感），并标 uncertain 让 badge 说人话。
    */
   function checkBackend() {
     if (!CFG.apiBase) { CFG.backend = { present: false, authorKey: false }; return Promise.resolve(CFG.backend); }
+    return probeHealth(0);
+  }
+
+  function probeHealth(attempt) {
     var ctrl = null;
-    try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(3500) }; } catch (e) {}
+    try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(8000) }; } catch (e) {}
     return fetch(CFG.apiBase + "/api/health", ctrl || {})
       .then(function (r) {
-        var present = r.ok || r.status === 503;   // 503 = 后端在但没配 key，仍算「有后端」
+        if (r.status === 404) return { present: false, authorKey: false, definitive: true };   // 静态宿主，定论
+        // 收到非 404 响应即证明后端存在；authorKey 从 health.gateway.keyConfigured 读（503=在但没配 key）
         return r.json().then(function (j) {
-          return { present: present, authorKey: !!(j && j.gateway && j.gateway.keyConfigured) };
-        }).catch(function () { return { present: present, authorKey: false }; });
+          return { present: true, authorKey: !!(j && j.gateway && j.gateway.keyConfigured), definitive: true };
+        }).catch(function () { return { present: true, authorKey: false, definitive: true }; });
       })
-      .catch(function () { return { present: false, authorKey: false }; })
-      .then(function (b) { CFG.backend = b; return b; });
+      .catch(function () { return { present: false, authorKey: false, definitive: false }; })  // 超时/网络错=不确定
+      .then(function (b) {
+        if (!b.definitive && attempt < 1) return delay(700).then(function () { return probeHealth(attempt + 1); });
+        var fin = b.definitive
+          ? { present: b.present, authorKey: b.authorKey }
+          : { present: true, authorKey: false, uncertain: true };   // 够不着也不杀 AI，乐观在线
+        CFG.backend = fin;
+        return fin;
+      });
   }
 
   /**

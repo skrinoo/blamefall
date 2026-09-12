@@ -129,7 +129,7 @@
    * 取出后若低于低水位，顺手触发一次后台补货。
    */
   function next() {
-    if (!buffer.length) return null;
+    if (!buffer.length) { topUp(); return null; }   // 空缓冲也要触发补货，否则开局预取一失败就整局无法自愈
     var pot = buffer.shift();
     topUp();   // 不 await，后台跑
     return pot;
@@ -138,9 +138,11 @@
   /**
    * 甩得快时单条预取流水线追不上消耗（旧 LOW=2 + 单 inflight 会让缓冲见底、
    * 后面的锅全落静态语料）。低于低水位就尽量把并发补货开满，让慢生成提前起跑。
+   * 空缓冲时由 next() 调用，兼作「开局预取失败后的自愈重试」。
+   * 注：online() 必须在循环条件里——离线时 prefetch 会直接 bail、不增 inflight，少了这道门会死循环。
    */
   function topUp() {
-    while (buffer.length < LOW && inflight < MAX_CONCURRENT && buffer.length < HIGH) prefetch(FETCH_N);
+    while (online() && buffer.length < LOW && inflight < MAX_CONCURRENT && buffer.length < HIGH) prefetch(FETCH_N);
   }
 
   return {

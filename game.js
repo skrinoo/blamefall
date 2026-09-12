@@ -1278,6 +1278,7 @@
     if (!cfg.apiBase)    { st.textContent = "离线兜底"; st.className = "ai-status"; return; }
     if (b && !b.present) { st.textContent = "该部署无后端 · 本地兜底 + 静态锅"; st.className = "ai-status"; return; }
     if (hasKey)          { st.textContent = "用自己的 Key · " + (cfg.model || "默认模型"); st.className = "ai-status ok"; return; }
+    if (b && b.uncertain) { st.textContent = "后端探测超时 · 仍会尝试 AI（作者兜底）"; st.className = "ai-status ok"; return; }
     if (b && b.present && !b.authorKey) { st.textContent = "后端在 · 无作者 Key（需自填）"; st.className = "ai-status"; return; }
     st.textContent = "作者兜底 Key · " + (cfg.model || "默认模型");
     st.className = "ai-status ok";
