@@ -162,6 +162,8 @@ api/probe.mjs       GET/POST /api/probe：拿玩家的 key+model 真调一句极
 | 开 | 留空 | 有 AI 判定 + AI 生成锅（作者兜底） | 作者网关账户 |
 | 开 | 填了 | 有 AI 判定 + AI 生成锅（玩家凭据） | 玩家网关账户 |
 
+> **作者兜底 AI 只在有后端的部署（Vercel）上生效**：GitHub Pages 是纯静态、没有 `/api`，那里无论开关如何都是无 AI 版（badge 会显示「该部署无后端」）。
+
 开关存 `localStorage`（`bf.aiEnabled`）。关闭时 `isOnline()` 恒 false：judgeFree 直接 null、PotGen 不预取、
 **不发任何 AI 网络请求**（浏览器实测 fetch 调用数 0）。
 

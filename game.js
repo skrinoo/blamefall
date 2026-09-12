@@ -1088,7 +1088,7 @@
     $("hud-act-name").textContent = ACTS[1].name;
     S.nextSpawn = 0.8;
     // 开局先后台预取一批 AI 锅填缓冲（热路径才发；失败/离线不影响下面的静态锅）。
-    if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(3);
+    if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(5);
     showScreen("screen-game");
     updateHud();
     refreshNpcBar();
@@ -1368,7 +1368,7 @@
       refreshAiStatus();
       updateMetaMode();
       // 热路径：确认有后端才后台预取 AI 锅暖缓冲（失败/超时不影响静态锅）。
-      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(3);
+      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(5);
     });
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，

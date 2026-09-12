@@ -25,14 +25,15 @@
   var TYPES = ["事实型", "情感型", "转移型", "反向型", "荒诞型"];
   var ROLES = { self: 1, npc: 1, institution: 1, any: 1 };
 
-  var HIGH = 4;        // 缓冲高水位：达到就不再预取（省 token）
-  var LOW = 2;         // 低水位：next() 后低于它就后台补一批
-  var FETCH_N = 3;     // 每次请求几口锅
+  var HIGH = 8;        // 缓冲高水位：达到就不再预取（省 token）
+  var LOW = 4;         // 低水位：next() 后低于它就后台补。补得早，慢生成才追得上快甩
+  var FETCH_N = 5;     // 每次请求几口锅（服务端 clamp 1..5，取满以提高单次回填量）
   var MAX_BUF = 12;    // 缓冲硬上限，防止长时间挂着无限堆积
+  var MAX_CONCURRENT = 2;  // 并发预取上限：快甩时单条流水线追不上消耗，开第二条
   var FETCH_TIMEOUT = 20000;
 
   var buffer = [];
-  var inflight = false;
+  var inflight = 0;    // 在途预取请求数（并发计数，不再是布尔）
   var lastErr = null;
 
   function online() {
@@ -88,8 +89,8 @@
    */
   function prefetch(n) {
     n = n || FETCH_N;
-    if (!online() || inflight || buffer.length >= HIGH) return Promise.resolve(0);
-    inflight = true;
+    if (!online() || inflight >= MAX_CONCURRENT || buffer.length >= HIGH) return Promise.resolve(0);
+    inflight++;
     var ctrl = null;
     try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(FETCH_TIMEOUT) }; } catch (e) {}
 
@@ -120,7 +121,7 @@
         return added;
       })
       .catch(function (e) { lastErr = "unreachable:" + (e && e.name ? e.name : e); return 0; })
-      .then(function (added) { inflight = false; return added; });
+      .then(function (added) { inflight--; return added; });
   }
 
   /**
@@ -130,8 +131,16 @@
   function next() {
     if (!buffer.length) return null;
     var pot = buffer.shift();
-    if (buffer.length < LOW) prefetch(FETCH_N);   // 不 await，后台跑
+    topUp();   // 不 await，后台跑
     return pot;
+  }
+
+  /**
+   * 甩得快时单条预取流水线追不上消耗（旧 LOW=2 + 单 inflight 会让缓冲见底、
+   * 后面的锅全落静态语料）。低于低水位就尽量把并发补货开满，让慢生成提前起跑。
+   */
+  function topUp() {
+    while (buffer.length < LOW && inflight < MAX_CONCURRENT && buffer.length < HIGH) prefetch(FETCH_N);
   }
 
   return {
