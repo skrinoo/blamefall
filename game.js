@@ -163,7 +163,7 @@
         '<div class="npc-rel"><i style="width:100%"></i></div>' +
         '<div class="npc-fatigue">0</div>';
       chip.addEventListener("click", function () { onNpcClick(n); });
-      chip.addEventListener("mouseenter", function () { if (S.held && !S.panelOpen) markTargetable(n.id); });
+      chip.addEventListener("mouseenter", function () { if (S.held && !S.panelOpen && !hasCast(S.held.def)) markTargetable(n.id); });
       bar.appendChild(chip);
       S.npcChip[n.id] = chip;
     });
@@ -175,7 +175,41 @@
     });
   }
   function clearTargetable() {
-    Object.keys(S.npcChip).forEach(function (k) { S.npcChip[k].classList.remove("targetable"); });
+    Object.keys(S.npcChip).forEach(function (k) { S.npcChip[k].classList.remove("targetable", "offcast"); });
+  }
+
+  // ═══════════════ 场景契合软过滤（cast）═══════════════
+  // 每口锅声明「牵扯到谁」(pot.def.cast)。握着锅时，把 cast 内的 NPC 点亮(targetable)，
+  // cast 外的变暗(offcast)——但仍然可点，甩过去会触发彩蛋，保留「乱甩被人怼」的教学价值。
+  // abstract(天气/水逆/星座) 与 self(过去/未来的自己) 来者不拒，永不参与过滤。
+  function hasCast(def) { return !!(def && def.cast && def.cast.length); }
+  function isOffCast(n, def) {
+    if (!hasCast(def)) return false;
+    if (n.kind === "abstract" || n.kind === "self") return false;
+    return def.cast.indexOf(n.id) < 0;
+  }
+  function applyCastFilter(def) {
+    if (!hasCast(def)) return;
+    NPCS.forEach(function (n) {
+      var chip = S.npcChip[n.id];
+      if (!chip) return;
+      chip.classList.remove("targetable", "offcast");
+      if (n.kind === "abstract" || n.kind === "self") return;
+      if (def.cast.indexOf(n.id) >= 0) chip.classList.add("targetable");
+      else chip.classList.add("offcast");
+    });
+  }
+
+  // offCast 彩蛋台词（内容待定 —— 这是占位钩子，想换成就 / 特殊台词 / 音效就改这里）
+  var OFFCAST_EGG = [
+    "（{n} 一脸茫然：这锅跟我有关系吗？）",
+    "（{n} 战术后仰：这场景里根本没我）",
+    "（把「{s}」的锅甩给 {n}，属实有点离谱）",
+    "（{n} 愣了两秒：你确定？确定要甩给我？）"
+  ];
+  function pickOffCastEgg(n, def) {
+    var line = OFFCAST_EGG[Math.floor(Math.random() * OFFCAST_EGG.length)];
+    return line.replace("{n}", n.name).replace("{s}", (def && def.scene) || "这");
   }
 
   function refreshNpcBar() {
@@ -310,7 +344,9 @@
     $("stage").classList.add("slowmo");
     $("actor").classList.add("armed");
     S.timeScale = 0.3;
-    devLog("抓 " + p.def.scene + " · 慢动作 0.3x · 握持预算 " + (HOLD_BUDGET / 1000) + "s", "dim");
+    applyCastFilter(p.def);
+    devLog("抓 " + p.def.scene + " · 慢动作 0.3x · 握持预算 " + (HOLD_BUDGET / 1000) + "s" +
+           (hasCast(p.def) ? " · cast=" + p.def.cast.join("/") : ""), "dim");
     toast(S.act === 1 ? "抓住了。选一个人。" : "抓住了，但别握太久。");
   }
 
@@ -339,6 +375,7 @@
     S.slipCount++;
     S.held = null;
     S.target = null;
+    clearTargetable();
     closePanel();
     $("stage").classList.remove("slowmo");
     $("actor").classList.remove("armed");
@@ -361,7 +398,9 @@
     if (!S.held) { toast("先抓住一口锅，才能甩给" + n.name + "。"); return; }
 
     S.target = n;
-    Object.keys(S.npcChip).forEach(function (k) { S.npcChip[k].classList.remove("targetable"); });
+    // 有 cast：保持「持续过滤高亮」，开着面板也能一眼看出这口锅牵扯到谁；
+    // 无 cast：清掉悬停留下的单个高亮。
+    if (!hasCast(S.held.def)) clearTargetable();
     openPanel(n);
   }
 
@@ -421,6 +460,7 @@
     var p = S.held;
     closePanel();
     S.target = null;
+    clearTargetable();
     if (p) { p.state = "falling"; p.el.classList.remove("held"); }
     S.held = null;
     $("stage").classList.remove("slowmo");
@@ -612,6 +652,14 @@
       chip.classList.add("reject");
       setTimeout(function () { chip.classList.remove("reject"); }, 460);
       floatAt(tr, res.shadowDelta ? "阴影 " + fmt(res.shadowDelta) : "被驳回", "bad");
+    }
+
+    // ── offCast 彩蛋（内容待定，占位实现）──────────────────
+    // 把锅甩给场景不搭的角色：不额外惩罚数值（judge 已按正常规则结算），
+    // 只飘一句错位吐槽，兑现「变暗仍可点一次并触发彩蛋」的设计承诺。
+    if (isOffCast(n, p.def)) {
+      devLog("offCast 彩蛋 · 把「" + p.def.scene + "」甩给不搭的 " + n.name, "dim");
+      setTimeout(function () { floatText(chip, pickOffCastEgg(n, p.def), "hold"); }, 320);
     }
 
     if (res.caught) {

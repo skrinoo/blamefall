@@ -35,6 +35,7 @@
       weight: 1.0,
       tutorial: true,
       ownershipOverride: { moyu: 0.9, didi: 0.2, roommate: 0.4, daoshi: 0.1 },
+      cast: ["moyu", "roommate", "didi", "daoshi"],
       options: {
         "事实型": "这部分是他在群里认领的，我有截图",
         "情感型": "我这周已经连着三天熬到两点了",
@@ -49,6 +50,7 @@
       text: "组员连续 14 天没在群里说过话，但他朋友圈更新了 9 条。",
       weight: 0.9,
       ownershipOverride: { moyu: 1.0, didi: 0.1, daoshi: 0.1 },
+      cast: ["moyu", "didi", "daoshi"],
       options: {
         "事实型": "群记录里他最后一次发言是 14 天前",
         "情感型": "我一直在替他兜着，真的撑不住了",
@@ -64,6 +66,7 @@
       weight: 1.0,
       tutorial: true,
       ownershipOverride: { roommate: 0.6, didi: 0.0, daoshi: 0.0, moyu: 0.0 },
+      cast: ["roommate", "fudaoyuan"],
       options: {
         "事实型": "这周我值了两次日，你一次都没值",
         "情感型": "我今天真的累到不想动",
@@ -78,6 +81,7 @@
       text: "宿舍电费超了 200 块，没有任何人承认自己开了空调。",
       weight: 0.8,
       ownershipOverride: { roommate: 0.5, jiaowu: 0.4, didi: 0.0 },
+      cast: ["roommate", "jiaowu"],
       options: {
         "事实型": "电表读数和你的作息完全对得上",
         "情感型": "我这月生活费已经见底了",
@@ -92,6 +96,7 @@
       text: "凌晨三点，有人在外放短视频。",
       weight: 0.8,
       ownershipOverride: { roommate: 0.8, fudaoyuan: 0.2, didi: 0.0 },
+      cast: ["roommate", "fudaoyuan"],
       options: {
         "事实型": "我录下来了，时间戳是 3:07",
         "情感型": "我明天八点有考试",
@@ -107,6 +112,7 @@
       weight: 0.9,
       tutorial: true,
       ownershipOverride: { xuezhang: 0.8, moyu: 0.5, didi: 0.2, daoshi: 0.0 },
+      cast: ["xuezhang", "moyu", "didi"],
       options: {
         "事实型": "排班表上这一栏写的是他的名字",
         "情感型": "我已经连做了三场活动的物料了",
@@ -121,6 +127,7 @@
       text: "社团活动经费超支 800 元，票据对不上。",
       weight: 0.7,
       ownershipOverride: { xuezhang: 0.9, jiaowu: 0.4, moyu: 0.3 },
+      cast: ["xuezhang", "jiaowu", "moyu"],
       options: {
         "事实型": "报销单上签字的那个人不是我",
         "情感型": "我垫的钱到现在还没回来",
@@ -136,6 +143,7 @@
       weight: 0.9,
       tutorial: true,
       ownershipOverride: { jiaowu: 0.9, daoshi: 0.1, fudaoyuan: 0.3, didi: 0.0 },
+      cast: ["jiaowu", "fudaoyuan", "daoshi"],
       options: {
         "事实型": "系统日志显示我在开放第 3 秒就提交了",
         "情感型": "我已经连续三个学期抢不到课了",
@@ -151,6 +159,7 @@
       text: "体测 800 米没跑完，成绩栏写着「缺考」。",
       weight: 0.6,
       ownershipOverride: { jiaowu: 0.5, daoshi: 0.1, roommate: 0.0 },
+      cast: ["jiaowu", "daoshi"],
       options: {
         "事实型": "那天校医院有我的挂号记录",
         "情感型": "我跑到第四圈真的喘不上气",
@@ -166,6 +175,7 @@
       text: "你发出去的消息，已经被读了 11 个小时。",
       weight: 0.8,
       ownershipOverride: { ex: 0.7, roommate: 0.1, didi: 0.0 },
+      cast: ["ex", "roommate", "didi"],
       options: {
         "事实型": "已读的时间戳是 11 小时前",
         "情感型": "我删了重打了七遍才发出去",
@@ -180,6 +190,7 @@
       text: "你在群里发的那句话，被截图转到了另一个群。",
       weight: 0.7,
       ownershipOverride: { ex: 0.4, roommate: 0.5, didi: 0.2, daoshi: 0.0 },
+      cast: ["ex", "roommate", "didi"],
       options: {
         "事实型": "截图里被裁掉的前半句才是重点",
         "情感型": "我发那句话的时候手是抖的",
@@ -195,6 +206,7 @@
       text: "你忘了那个人的生日，而对方记得你的每一个。",
       weight: 0.6,
       ownershipOverride: { ex: 0.5, roommate: 0.3, didi: 0.1, daoshi: 0.0 },
+      cast: ["ex", "roommate", "didi"],
       options: {
         "事实型": "日历那天正好撞上期中周第三场",
         "情感型": "我不是不在乎，我只是害怕在乎",
@@ -210,6 +222,7 @@
       text: "生活费在月底准时归零，而距离下个月还有 9 天。",
       weight: 0.7,
       ownershipOverride: { roommate: 0.0, jiaowu: 0.1, didi: 0.0 },
+      cast: ["roommate", "shitang", "jiaowu"],
       options: {
         "事实型": "账单显示 63% 花在了食堂以外",
         "情感型": "我已经吃了四天挂面了",
@@ -225,6 +238,7 @@
       text: "秋招结束了，你的 offer 数量是 0。",
       weight: 0.7,
       ownershipOverride: { daoshi: 0.2, jiaowu: 0.2, xuezhang: 0.1 },
+      cast: ["daoshi", "xuezhang", "jiaowu"],
       options: {
         "事实型": "我投了 87 份简历，只收到 3 个回复",
         "情感型": "我连续两个月每天改简历到凌晨一点",
@@ -245,6 +259,7 @@
       weight: 0.8,
       selfish: true,
       ownershipOverride: { jiaowu: 0.1, daoshi: 0.0, roommate: 0.1, didi: 0.0, moyu: 0.0 },
+      cast: ["past_self", "future_self", "daoshi", "jiaowu"],
       options: {
         "事实型": "闹钟响过三次，我都按掉了",
         "情感型": "我这周真的没有一晚睡好",
@@ -261,6 +276,7 @@
       weight: 0.8,
       selfish: true,
       ownershipOverride: { roommate: 0.1, jiaowu: 0.0, daoshi: 0.0, didi: 0.0 },
+      cast: ["past_self", "future_self", "roommate"],
       options: {
         "事实型": "屏幕使用时间显示昨晚是 5 小时 12 分",
         "情感型": "我白天已经绷了一整天了",
@@ -277,6 +293,7 @@
       weight: 0.6,
       selfish: true,
       ownershipOverride: { shitang: 0.2, roommate: 0.0, jiaowu: 0.0, didi: 0.0 },
+      cast: ["past_self", "future_self", "shitang"],
       options: {
         "事实型": "食堂七点半就关门了，我七点四十才起",
         "情感型": "我最近真的连起床都很费劲",

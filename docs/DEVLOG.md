@@ -1010,3 +1010,25 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 **安全。** 本轮聊天里出现了一枚**明文真实 key**——已提醒用户立即到网关后台吊销/轮换；该 key **未**写入任何文件、记忆或提交，也**未**被用来调用网关（不烧用户 token）。教训：演示/排查一律走 env 或标题屏输入，绝不把 key 贴进任何会被记录的地方。
 
 **边界（诚实说）。** ① agent 机器够不着 `*.vercel.app`（大陆封锁）、也不会用那枚泄露 key 调真实网关，所以 `max_tokens` 修复**未能在真实网关上端到端跑通**——它是「代码 + 症状（有调用记录却无 AI）」吻合度最高的根因，且无论如何都是该拆的地雷。**真正的确认要靠新加的可观测性**：用户重新部署 Vercel 后若仍「无 AI」，按 `` ` `` 或点「检测」即可读到确切错误码——`empty_content` 说明仍是思考型/上限问题（配 `BLAMEFALL_EXTRA_BODY` 关思考或配正数 `max_tokens`）、`http_402` 是额度、`validate_rejected` 看原文片段是哪个字段。② 服务端改动（`api/_gateway.mjs`）需**重新部署**才生效。smoke 45/45 无回归。
+
+## 18. 场景↔角色错配：一个 `cast` 字段一箭三雕（提示词约束 + 目标软过滤 + 前任复活，2026-09-12）
+
+**用户观察（真问题）**：锅生成里「宿舍」场景高频出现，但真正说得过去的甩锅对象只有室友相关几个；场景与角色不匹配。用户要求先大量对局观察、报告，再评估三条路：(a) 增加角色 (b) 限制提示词 (c) 每次点锅下方只罗列场景相关角色（也可掺几个不相关的）。
+
+**实证（25 口样本：15 静态 + 10 真 AI）**：① 宿舍场景≈20%，AI 只在 5 个场景里打转；② 宿舍锅的 `ownershipOverride` 铁证般地以 roommate 为主——场景与角色的绑定本来就存在，只是没被显式声明；③ **AI 乱造场景标签把「前任」废了**：ex 的旧硬锁是 `pot.scene === npc.scene`（="情感社交"）字符串相等，而 AI 造的是「食堂排队」「期末考试」这类自由文本，A/B 两组各 10 口锅**0 口情感社交** → ex 在 AI 锅里永远被原样扔回 = 形同废号；④ 幽灵角色：AI 理由点名宿管阿姨/隔壁/教授等不在 14 人名单里的人，玩家根本甩不到。
+
+**「限制提示词会不会降质」——两层模型 + A/B 实测。** 锅生成分「元数据层」（scene 标签、甩锅落点）和「表达层」（正文画面感、理由机智度）。约束只碰元数据层。用约束版提示词 v2（固定场景枚举 + 必填 cast + 落点约束 + 反套路）生成 B 组 10 口，与自由版 A 组对比：**生动性不降、场景标签收敛、cast 纯增益、幽灵角色降级为背景、JSON 100% 合法**，代价仅 token +27%。结论：约束元数据层不损表达层，反而让「按理由找对象」这件核心玩法更可教。
+
+**用户拍板**：做 (b) 提示词约束 + (c) 目标高亮软过滤（cast 外**变暗但仍可点一次并触发彩蛋**，彩蛋内容待定）+ ex 类特殊 NPC 改用 cast 做可用性判据。
+
+**核心设计——一个 `cast` 字段驱动三件事。** 每口锅声明「牵扯到谁」（2~5 个名单内 npcId）：① 提示词约束（理由落点必须能在 cast 里找到）；② 目标高亮软过滤（握锅时 cast 内点亮 `.targetable`、cast 外变暗 `.offcast`）；③ ex 判据（`ex ∈ cast` 才接，取代脆弱的 scene 字符串相等）。
+
+- **软过滤 ≠ 硬隐藏**：`.offcast` 只是变暗（opacity .4 + grayscale）+「不搭」角标，**仍可点**——甩过去按正常规则结算、不额外扣分，只飘一句错位吐槽。保留「乱甩被人怼」的教学价值与关系仪表盘可见性，区别于 `.coldwar` 的 not-allowed 硬禁点。
+- **豁免**：abstract（天气/水逆/星座）与 self（过去/未来的自己）来者不拒，永不参与过滤。
+- **同源双校验**：`api/genpot.mjs`（服务端 `sanitizePot`）与 `engine/potgen.js`（客户端 `sanitize`）都放行 cast，白名单 `CAST_IDS`（14 个 npcId）同源；缺失/全非法则**不写** `pot.cast`，游戏与 judge 都回落到「不做 cast 过滤」，向后兼容旧锅。
+
+**改动清单**：`prompts/genpot-v2.txt`（新建，锁场景枚举 + 必填 cast + 落点约束 + 反套路）；`api/genpot.mjs`（`PROMPT_REL`→v2、加 `CAST_IDS`、`sanitizePot` 放行 cast）；`engine/potgen.js`（同源 `CAST_IDS` + sanitize 放行）；`data/pots.js`（**17 口**静态锅逐口加 cast，按 ownershipOverride + 场景语义）；`engine/judge.js`（ex 的 scene 锁→cast 判据，cast 缺失回落 scene 相等）；`game.js`（`hasCast/isOffCast/applyCastFilter/pickOffCastEgg` + `clearTargetable` 清 offcast + grabPot/onNpcClick/mouseenter/slipPot/releasePot/finishThrow 全链路接入 + offCast 彩蛋钩子）；`style.css`（`.npc.offcast` 变暗 + hover 回亮 + 「不搭」角标）。
+
+**浏览器实证（dev-server MOCK，`evaluate_script` 真点击驱动全链路）**：① 数据层：17 口锅 cast **全部合法**（id 均在 14 人白名单、无重复、场景语义正确）；② ex 判据 5 用例全过——ex+含 ex 的 cast 锅**不再弹回（复活）**、ex+不含 ex 的锅弹回、旧锅无 cast 回落 scene 相等/不等均正确、普通 NPC 无 scene 锁永不受限；③ 高亮分区：抓「自我管理」锅 → targetable=daoshi/jiaowu、offcast=其余 7 个 normal NPC、3 abstract + 2 self 两边都不进（2+7+5=14 ✓）；抓「就业压力」锅 → targetable=xuezhang/daoshi/jiaowu（正好 cast）；④ 彩蛋：点变暗的 didi（**确认可点**）→ 面板开 → 甩锅成功（+100 分、按正常规则结算无额外惩罚）→ `float hold` 飘出「（学弟学妹 战术后仰：这场景里根本没我）」。smoke 45/45 无回归。
+
+**边界（诚实说）**：① **彩蛋内容是占位**——用户明确说「待定」，当前实现是 `OFFCAST_EGG` 随机错位吐槽台词 + devLog，纯表现层、不改任何判定数值；想换成就/特殊台词/音效/关系惩罚，改 `game.js` 里 `OFFCAST_EGG` 与 `pickOffCastEgg` 即可，钩子已埋在 `finishThrow`。② AI 锅的 cast 质量依赖 v2 提示词，本地 MOCK 的 genpot 返回的 mock 锅**不带 cast**（走「不过滤」向后兼容路径），真 AI 锅的 cast 收敛度需部署后在真实网关上复验。③ 服务端改动（`api/genpot.mjs` + 新提示词）需**重新部署 Vercel** 才生效；`vercel.json` 的 `includeFiles: prompts/**` 已覆盖 v2，无需改配置。④ 本轮只做了本地提交，未推送。

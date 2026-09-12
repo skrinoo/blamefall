@@ -35,9 +35,11 @@ export const config = {
   maxDuration: 30,
 };
 
-const PROMPT_REL = "../prompts/genpot-v1.txt";
+const PROMPT_REL = "../prompts/genpot-v2.txt";
 const TYPES = ["事实型", "情感型", "转移型", "反向型", "荒诞型"];
 const ROLES = new Set(["self", "npc", "institution", "any"]);
+// cast / ownershipOverride 的合法 npcId 白名单，必须与 data/npcs.js 的 14 个 id 同源。
+const CAST_IDS = new Set(["didi", "roommate", "moyu", "xuezhang", "daoshi", "jiaowu", "fudaoyuan", "shitang", "ex", "tianqi", "shuini", "xingzuo", "future_self", "past_self"]);
 
 // 生成上游比判定慢，给它比 judge 更长的兜底超时（客户端不阻塞，无所谓等）。
 const GEN_TIMEOUT_MS = Number(process.env.BLAMEFALL_GEN_TIMEOUT) || 22000;
@@ -87,6 +89,20 @@ function sanitizePot(raw, idx) {
       if (Number.isFinite(v)) oo[k] = Math.min(1, Math.max(0, v));
     }
     if (Object.keys(oo).length) pot.ownershipOverride = oo;
+  }
+
+  // cast：这口锅「牵扯到谁」。白名单过滤 + 去重 + 限量（≤6）。
+  // 缺失或全非法则不写 pot.cast —— 游戏的目标高亮与 judge 的 ex 判据都会回落到
+  // 「不做 cast 过滤」，向后兼容旧锅。
+  if (Array.isArray(raw.cast)) {
+    const seen = new Set();
+    const cast = [];
+    for (const c of raw.cast) {
+      const id = String(c == null ? "" : c).trim();
+      if (CAST_IDS.has(id) && !seen.has(id)) { seen.add(id); cast.push(id); }
+      if (cast.length >= 6) break;
+    }
+    if (cast.length) pot.cast = cast;
   }
 
   return pot;

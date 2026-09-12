@@ -220,14 +220,22 @@
       return result;
     }
 
-    // ── 2. 场景不匹配（前任只接情感类锅）──────────────────
-    if (npc.scene && pot.scene !== npc.scene) {
-      result.reflected = true;
-      result.shadowDelta = 3;
-      result.verdict = "这口锅和" + npc.name + "没有任何关系，它被原样扔了回来。";
-      result.reaction = "？";
-      events.push("sceneMismatch");
-      return result;
+    // ── 2. 挑剔 NPC 的可用性判据（前任只接「点名到 TA」的锅）──────
+    // 旧版用 pot.scene !== npc.scene 的字符串相等，脆弱：AI 造的场景标签对不上
+    // 「情感社交」，导致 ex 在 AI 锅里永远弹回 = 废号。改用 cast：锅声明了「牵扯到谁」，
+    // 被点名(npc.id ∈ pot.cast)才接。cast 缺失(老锅/兜底)时回落到旧的 scene 相等，向后兼容。
+    if (npc.scene) {
+      var named = (pot && pot.cast && pot.cast.length)
+        ? (pot.cast.indexOf(npc.id) >= 0)
+        : (pot && pot.scene === npc.scene);
+      if (!named) {
+        result.reflected = true;
+        result.shadowDelta = 3;
+        result.verdict = "这口锅和" + npc.name + "没有任何关系，它被原样扔了回来。";
+        result.reaction = "？";
+        events.push("sceneMismatch");
+        return result;
+      }
     }
 
     // ── 3. 冷战校验 ───────────────────────────────────────
