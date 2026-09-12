@@ -1139,12 +1139,16 @@
     $("sky").innerHTML = "";
     $("hud-act").textContent = "第一幕";
     $("hud-act-name").textContent = ACTS[1].name;
-    S.nextSpawn = 0.8;
+    // 开局暖机窗口（= 适当增加的开局加载时间）：缓冲空时首锅延迟 3s，给 prefetch 填货机会，
+    // 让首口锅更可能是 AI 锅；缓冲已暖（boot 预取成功）则不浪费，0.8s 照常掉锅。
+    var warmup = (typeof PotGen !== "undefined" && PotGen.enabled() && PotGen.size() === 0);
+    S.nextSpawn = warmup ? 3.0 : 0.8;
     // 开局先后台预取一批 AI 锅填缓冲（热路径才发；失败/离线不影响下面的静态锅）。
     if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(2);
     showScreen("screen-game");
     updateHud();
     refreshNpcBar();
+    if (warmup) toast("AI 锅备料中…", 1600);
     devLog("══ 开局 · 判定库 " + Object.keys(VERDICTS.entries).length + " 条 · " +
            (JudgeAPI.isOnline() ? "在线裁判 " + JudgeAPI.cfg.apiBase : "离线模式（查表 + 兜底引擎）") + " ══", "umb");
     if (carryOver.extraPots > 0) {
