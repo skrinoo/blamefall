@@ -133,7 +133,7 @@ probe.errorCodes                    非空就是上游出问题了，见故障�
 `?probe=3` 会真调三次网关，给出 min / median / max。
 单次数字没有意义 —— 「预算够不够」的答案是一个分布，不是一个点。
 
-### ② 冒烟测试（29 条断言）
+### ② 冒烟测试（45 条断言）
 
 同一套断言对本地和生产都能跑：
 
@@ -142,8 +142,9 @@ cd blamefall/scripts
 .\smoke-test.ps1 -BaseUrl https://<你的域名>
 ```
 
-期望 `全部通过：29/29`，退出码 0。
-它覆盖静态资源编码、路径穿越防护、health/judge 端点、
+期望 `全部通过：45/45`，退出码 0。
+它覆盖静态资源编码、路径穿越防护、health/judge/genpot/probe 端点、
+请求级凭据覆盖（`x-bf-key`/`x-bf-model`，含「坏 Key 仍返回 200」「响应不回显 Key 明文」），
 以及**复现 `engine/api.js` 的 validate() 全字段契约**。
 
 > 生产环境下 `4.2.9 中文编码链路完好` 这条会跳过 —— 它依赖 dev-server 的
@@ -285,13 +286,15 @@ $env:BLAMEFALL_API_KEY  = '<密钥>'
 | 文件 | 作用 |
 |---|---|
 | [`api/judge.mjs`](../api/judge.mjs) | 主裁判端点，刻意做薄 |
+| [`api/genpot.mjs`](../api/genpot.mjs) | AI 生成锅端点，服务端逐口洗成引擎可用的 def |
+| [`api/probe.mjs`](../api/probe.mjs) | 模型可用性探针，拿玩家 Key/模型真调一句（失败也回 200） |
 | [`api/health.mjs`](../api/health.mjs) | 健康检查 + 延迟实测 |
-| [`api/_gateway.mjs`](../api/_gateway.mjs) | 共享层。两个端点走同一条上游路径，所以 health 报的延迟就是 judge 的真实延迟 |
+| [`api/_gateway.mjs`](../api/_gateway.mjs) | 共享层。所有端点走同一条上游路径 + 请求级 key/model 覆盖（base 恒等 env），所以 health 报的延迟就是 judge 的真实延迟 |
 | [`vercel.json`](../vercel.json) | `includeFiles` 把 `prompts/` 打进 lambda bundle |
 | [`prompts/judge-v3.txt`](../prompts/judge-v3.txt) | system prompt 的**唯一权威副本**，服务端运行时读取 |
 | [`.env.example`](../.env.example) | 环境变量模板（不含真值，必须提交） |
 | [`scripts/dev-server.ps1`](../scripts/dev-server.ps1) | 本地开发服务器（MOCK / PROXY） |
-| [`scripts/smoke-test.ps1`](../scripts/smoke-test.ps1) | 29 条断言，本地与生产通用 |
+| [`scripts/smoke-test.ps1`](../scripts/smoke-test.ps1) | 45 条断言（含 genpot/probe 与请求级凭据），本地与生产通用 |
 
 ---
 
