@@ -100,6 +100,20 @@
     return !CFG.backend || !!CFG.backend.present;
   }
 
+  // ── 可观测性：绝不静默失败 ──────────────────────────
+  // 这个项目被「无 AI」bug 反复撞了太多次，根因是每一道闸门失败都静默
+  // 降级成同一个「本地兜底」，外面完全看不出是哪一道挂了。lastError 把精确
+  // 原因留住：网关错误码（empty_content / http_402 / …）、客户端超时、校验被拒
+  // （含原文片段）、网络不可达。开发者面板与「检测」按钮读它，下次「无 AI」
+  // 一眼定位，不再猜。fail() 只记录、不影响控制流（仍然 resolve(null) 落兜底）。
+  var lastError = null;
+  function fail(code, detail) {
+    lastError = { code: String(code || "unknown"), detail: detail ? String(detail).slice(0, 200) : null, at: Date.now() };
+    try { if (G.console && G.console.warn) G.console.warn("[JudgeAPI] AI 调用失败 →", lastError.code, lastError.detail || ""); } catch (e) {}
+  }
+  function getLastError() { return lastError; }
+  function clearLastError() { lastError = null; }
+
   /** 剥掉模型可能违规加上的 markdown 围栏（prompt 已禁止，但仍要防） */
   function stripFence(raw) {
     var s = String(raw).trim();
@@ -123,15 +137,19 @@
     if (!o || typeof o !== "object" || Array.isArray(o)) return null;
 
     if (VALID_TYPES.indexOf(o.argument_type) < 0) return null;
-    if (typeof o.persuasiveness !== "number" || !isFinite(o.persuasiveness)) return null;
-    if (o.persuasiveness < 0 || o.persuasiveness > 100) return null;
+    // persuasiveness 容错：有些模型（含 gemini 经某些网关）会输出数字字符串 "78"，
+    // 旧版一律拒掉 → 静默兜底 → 又一种「有调用记录却无 AI」。宽松强转一次，转不出有限数才拒。
+    var pers = o.persuasiveness;
+    if (typeof pers === "string" && pers.trim() !== "" && isFinite(Number(pers))) pers = Number(pers);
+    if (typeof pers !== "number" || !isFinite(pers)) return null;
+    if (pers < 0 || pers > 100) return null;
     if (typeof o.technique_name !== "string" || !o.technique_name.trim()) return null;
     if (typeof o.verdict !== "string" || o.verdict.trim().length < 8) return null;
     if (!o.reaction_success && !o.reaction_fail) return null;
 
     return {
       argumentType: o.argument_type,
-      persuasiveness: Math.round(o.persuasiveness),
+      persuasiveness: Math.round(pers),
       technique: o.technique_name.trim(),
       verdict: o.verdict.trim(),
       reactionSuccess: String(o.reaction_success || "").trim(),
@@ -150,7 +168,7 @@
    * @returns {Promise<Object|null>}  resolve 一定是 null 或已校验对象，绝不 reject
    */
   function judgeFree(p) {
-    if (!isOnline()) return Promise.resolve(null);   // 离线：立刻交给兜底引擎
+    if (!isOnline()) { fail("offline_gate"); return Promise.resolve(null); }   // 离线/无后端：立刻交给兜底引擎
 
     return new Promise(function (resolve) {
       var ctrl = ("AbortController" in G) ? new G.AbortController() : null;
@@ -162,6 +180,7 @@
         if (done) return;
         done = true;
         if (ctrl) { try { ctrl.abort(); } catch (e) {} }
+        fail("client_timeout", CFG.timeout + "ms");
         resolve(null);
       }, CFG.timeout);
 
@@ -185,21 +204,35 @@
 
       fetch(CFG.apiBase + "/api/judge", opt)
         .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
+          if (!r.ok) {
+            // 关键修复：旧版 `throw → catch → resolve(null)` 把服务端的精确错误码
+            // （empty_content / http_402 / …）整个扔掉，于是「无 AI」永远查不到原因。
+            // 现在读出 error.code 记进 lastError，再落兜底。
+            return r.json().catch(function () { return null; }).then(function (ej) {
+              if (done) return;
+              done = true; clearTimeout(timer);
+              var err = ej && ej.error;
+              var code = err ? (typeof err === "object" ? err.code : err) : ("http_" + r.status);
+              fail(code || ("http_" + r.status), (err && err.usage) ? ("usage=" + JSON.stringify(err.usage)) : ("HTTP " + r.status));
+              resolve(null);
+            });
+          }
+          return r.json().then(function (json) {
+            if (done) return;
+            done = true; clearTimeout(timer);
+            // 后端可以返回已解析对象，也可以返回网关原始字符串，两种都吃
+            var raw = (json && typeof json.raw === "string") ? json.raw : JSON.stringify(json && json.data ? json.data : json);
+            var v = validate(raw);
+            if (v) lastError = null;                                     // 成功：清掉旧错误
+            else fail("validate_rejected", String(raw).slice(0, 140));   // 字段不合格：留住原文片段供排查
+            resolve(v);
+          });
         })
-        .then(function (json) {
+        .catch(function (e) {
           if (done) return;
           done = true;
           clearTimeout(timer);
-          // 后端可以返回已解析对象，也可以返回网关原始字符串，两种都吃
-          var raw = (json && typeof json.raw === "string") ? json.raw : JSON.stringify(json && json.data ? json.data : json);
-          resolve(validate(raw));
-        })
-        .catch(function () {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
+          fail("unreachable", (e && e.message) ? e.message : String(e));
           resolve(null);
         });
     });
@@ -319,6 +352,8 @@
     checkBackend: checkBackend,
     isEnabled: isEnabled,
     isOnline: isOnline,
+    getLastError: getLastError,
+    clearLastError: clearLastError,
     VALID_TYPES: VALID_TYPES,
     get cfg() { return CFG; }
   };

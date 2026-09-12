@@ -80,13 +80,22 @@
    * ai 载荷的三种形态都兼容：
    *   { reactionSuccess, reactionFail }  判定库 / v3 实时裁判
    *   { reaction }                       旧格式，单条
+   *
+   * 系统性根治「空回复」：判定库某类型缺台词时（如抽象 NPC 的 转移型/反向型
+   * 回落到 generic，而 generic 只有 technique/verdict、没有 reaction），
+   * 依次回落到 npc.fixedReaction → 一句中性台词，**绝不返回空字符串**。
+   * 这样无论判定库将来漏了哪一条，气泡里都不会再出现空白。
    */
-  function pickReaction(ai, success) {
-    if (!ai) return "";
-    var picked = success ? ai.reactionSuccess : ai.reactionFail;
+  function pickReaction(ai, success, npc) {
+    var picked = "";
+    if (ai) {
+      picked = success ? ai.reactionSuccess : ai.reactionFail;
+      // 缺一条时用另一条兜住，宁可台词略不贴，也不要出现空白气泡
+      if (!picked) picked = ai.reactionFail || ai.reactionSuccess || ai.reaction || "";
+    }
     if (picked) return picked;
-    // 缺一条时用另一条兜住，宁可台词略不贴，也不要出现空白气泡
-    return ai.reactionFail || ai.reactionSuccess || ai.reaction || "";
+    if (npc && npc.fixedReaction) return npc.fixedReaction;
+    return "（对方没有接话，锅就这么留下了。）";
   }
 
   /** 取该 NPC 对该锅的归属度：优先用锅的 override，否则用 NPC 默认值 */
@@ -279,7 +288,7 @@
       result.technique = aiAbs.technique || "不可抗力滥用";
       result.verdict = aiAbs.verdict || "";
       // 抽象 NPC 永远成功，但反甩/冷战不适用，直接取成功台词
-      result.reaction = pickReaction(aiAbs, true);
+      result.reaction = pickReaction(aiAbs, true, npc);
       result.source = o.quick ? "library" : (o.ai ? "ai" : "fallback");
       events.push("abstract");
       return result;
@@ -319,7 +328,7 @@
     result.success = success;
     result.technique = (o.ai && o.ai.technique) || "";
     result.verdict = (o.ai && o.ai.verdict) || "";
-    result.reaction = pickReaction(o.ai, success);
+    result.reaction = pickReaction(o.ai, success, npc);
 
     if (critical) events.push("critical");
 
@@ -330,7 +339,7 @@
       result.score = 0;
       result.shadowDelta = 3;
       // 反甩＝对方没接，台词必须换成拒绝的那一条
-      result.reaction = pickReaction(o.ai, false);
+      result.reaction = pickReaction(o.ai, false, npc);
       events.push("reflect");
       return result;
     }
@@ -348,7 +357,7 @@
       result.relationDelta = 0;
       result.freezeMs = 2000;
       result.verdict = "锅没有落地，也没有易主。它被一句话停在了半空。";
-      result.reaction = pickReaction(o.ai, false);
+      result.reaction = pickReaction(o.ai, false, npc);
       events.push("suspend");
       return result;
     }

@@ -24,8 +24,11 @@ export const MODEL = process.env.BLAMEFALL_MODEL || "gemini-2.5-flash";
 // 两个数字不一样是有意的：裁判要稳，文案要野。别混。
 export const TEMPERATURE = num(process.env.BLAMEFALL_TEMPERATURE, 0.85);
 
-// max_tokens = 0 在实测网关上表示「不限制」。
-// 若换成严格的 OpenAI 兼容实现，0 会被当成「不许输出任何 token」，届时改成 600。
+// max_tokens：仅当配成**正数**时才随请求发出。默认 0 = 「省略该字段」，
+// 交给网关用模型默认上限。绝不发 max_tokens:0 —— 0 的语义是网关专属的：
+// 实测网关（openai-next）当「不限制」，严格的 OpenAI 兼容实现却当「一个 token
+// 都不许输出」→ 正文为空 → empty_content → 客户端静默落兜底（token 照烧、
+// 平台有调用记录，却「无 AI」）。详见 callGateway 内注释。
 export const MAX_TOKENS = num(process.env.BLAMEFALL_MAX_TOKENS, 0);
 
 // 上游超时兜底。客户端 1350ms 就会 abort（engine/api.js），
@@ -37,6 +40,22 @@ export const PROMPT_REL = "../prompts/judge-v3.txt";
 function num(v, d) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
+}
+
+// 网关专属参数的逃生舱：一个 JSON 对象，合并进请求体（固定字段优先，不可篡改
+// model/messages 路由）。用途：思考型模型关思考（如 {"thinking_budget":0} 或
+// {"reasoning_effort":"low"}），或某网关要求的专有字段。解析失败静默忽略，
+// 绝不让一个坏 env 拖垮整条调用链。这样下次再遇到网关怪癖，改 env 即可，不必改代码。
+export const EXTRA_BODY = parseObj(process.env.BLAMEFALL_EXTRA_BODY);
+
+function parseObj(v) {
+  if (!v) return {};
+  try {
+    const o = JSON.parse(v);
+    return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+  } catch (e) {
+    return {};
+  }
 }
 
 /**
@@ -161,6 +180,21 @@ export async function callGateway({ systemPrompt, userPrompt, timeoutMs, req }) 
   }
 
   const t0 = Date.now();
+  // 请求体。EXTRA_BODY 先铺底（网关专属参数），固定字段后写覆盖，确保玩家/作者
+  // 的 env 逃生舱不能篡改 model/messages 路由。
+  // 必须用 cfg.model 而不是模块级 MODEL：前者含玩家请求级 x-bf-model 覆盖，
+  // 后者只是 env 默认值。用错的话探针会报告「某模型可用」却实际调了默认模型。
+  const reqBody = Object.assign({}, EXTRA_BODY, {
+    model: cfg.model,
+    temperature: TEMPERATURE,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+  // ⚠️ 只有显式配了正数才发 max_tokens。绝不发 max_tokens:0（见 MAX_TOKENS 注释）：
+  // 那是「用自己的 key + gemini-2.5-flash 却用不了 AI、平台却有调用记录」的根因之一。
+  if (MAX_TOKENS > 0) reqBody.max_tokens = MAX_TOKENS;
   let res;
   try {
     res = await fetch(`${cfg._base}/chat/completions`, {
@@ -169,17 +203,7 @@ export async function callGateway({ systemPrompt, userPrompt, timeoutMs, req }) 
         "Content-Type": "application/json",
         Authorization: `Bearer ${cfg._key}`,
       },
-      body: JSON.stringify({
-        // 必须用 cfg.model 而不是模块级 MODEL：前者含玩家请求级 x-bf-model 覆盖，
-        // 后者只是 env 默认值。用错的话探针会报告「某模型可用」却实际调了默认模型。
-        model: cfg.model,
-        temperature: TEMPERATURE,
-        max_tokens: MAX_TOKENS,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
+      body: JSON.stringify(reqBody),
       signal: AbortSignal.timeout(limit),
     });
   } catch (e) {
@@ -215,7 +239,9 @@ export async function callGateway({ systemPrompt, userPrompt, timeoutMs, req }) 
   // step-3.7-flash 在 max_tokens=2500 下烧掉 4409 completion_tokens，
   // 正式回答却是空的，只回吐思维链。不做这层检查，客户端会拿到空字符串。
   if (!content || !String(content).trim()) {
-    console.error("[gateway] 响应里没有 message.content。usage=", JSON.stringify(usage || {}));
+    console.error("[gateway] 响应里没有 message.content。model=", cfg.model,
+      "max_tokens_sent=", (MAX_TOKENS > 0 ? MAX_TOKENS : "(omitted)"),
+      "usage=", JSON.stringify(usage || {}));
     return { ok: false, content: null, latencyMs, usage, errorCode: "empty_content", httpStatus: res.status };
   }
 

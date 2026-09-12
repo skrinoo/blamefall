@@ -245,6 +245,9 @@
       reflectChance: 0,
       kind: "abstract",
       scene: null,
+      // 抽象 NPC 无法开口，但绝不允许气泡空白：判定库该类型缺台词（如走 generic
+      // 回落，generic 只有 technique/verdict 没有 reaction）时，用这句固定台词兜底。
+      fixedReaction: "今日风向复杂，气压偏低，本单位不予回应。",
       desc: "抽象概念，无法开口，由裁判代为陈述其「态度」"
     },
     {
@@ -264,6 +267,7 @@
       reflectChance: 0,
       kind: "abstract",
       scene: null,
+      fixedReaction: "信号已被行星阻断，请等待下一个周期。",
       desc: "抽象概念，无法开口，由裁判代为陈述其「态度」；一本正经配合荒谬前提"
     },
     {
@@ -283,6 +287,7 @@
       reflectChance: 0,
       kind: "abstract",
       scene: null,
+      fixedReaction: "星图排列已生效，本宫拒绝任何质询。",
       desc: "抽象概念，无法开口，由裁判代为陈述其「态度」"
     },
     {

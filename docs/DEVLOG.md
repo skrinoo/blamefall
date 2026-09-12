@@ -984,3 +984,29 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 
 **边界（诚实说）**：若作者网关额度真的耗尽（持续 402），自愈重试也变不出锅、仍会落静态——那是 token 供给问题，
 不是客户端能修的；客户端能做的是「只要后端还能出货，就绝不因为一次失败/一次慢探测而整局放弃 AI」。smoke 45/45 无回归。
+
+## 17. 「无 AI」为什么修了又修还在 + 空回复（深度根因 + 可观测性根治，2026-09-12）
+
+**用户复报（三件）**：① 用自己的 key + gemini-2.5-flash 用不了 AI，**但平台有调用记录**；② 留白走作者兜底也用不了 AI；③ 刚刷新就开局是无 AI、等一会儿再开局又变成有 AI。外加灵魂拷问：「为什么这个 bug 出现了好多次、修了好多次仍然存在？深度分析，尽量修完不再出现。」
+
+**先回答「为什么反复出现」——这不是同一个 bug 复活，是一类 bug 在不同闸门轮流现身。** 从「玩家想要 AI」到「AI 真的出现」之间有一长串独立闸门：`aiEnabled → apiBase → backend.present → 网络可达 → HTTP 状态 → 服务端正文抽取 → 客户端字段校验 → 缓冲是否暖好`。**每一道闸门失败都按设计静默降级成同一个「本地兜底 / 静态锅」**（「玩家无感」是对的 UX），于是所有故障长得一模一样——都叫「无 AI」。更致命的是：客户端 `api.js` 旧代码 `if(!r.ok) throw → catch → resolve(null)`，把服务端返回的**精确错误码整个扔掉**；`validate()` 返回 null 也同样无声。所以我们一直在**盲修**：§13 修 model 回显、§14 修 badge 谎报、§15 修缓冲太浅、§16 修缓冲不自愈 + 冷启动误杀——每道都是真 bug，但症状不可区分，修完一道、另一道又冒头，看起来就像「同一个 bug 回来了」。
+
+**本轮根因（①②）——`max_tokens: 0` 这颗网关专属地雷（`api/_gateway.mjs`）。** 请求体一直发 `max_tokens: MAX_TOKENS`、默认 `0`。`0` 的语义是**网关专属**的：作者实测网关（openai-next）当「不限制」，所以零成本验证时 gemini-2.5-flash 正常；但**严格的 OpenAI 兼容实现把 `0` 当「一个 token 都不许输出」**→ 正文为空 → 服务端 `empty_content` → HTTP 502 → 客户端旧代码把 502 一 throw 就 `resolve(null)` → 静默落兜底。**token 照烧（prompt+思考已计费）、平台有调用记录，玩家侧却「无 AI」**——与 ①② 完全吻合；且作者兜底与自带 key 共用同一个 `callGateway`，两条路一起中招。
+
+- 修复：**只有显式配了正数才发 `max_tokens`，默认整个字段省略**，交给网关用模型默认上限（省略比发 0 严格更安全：把 0 当无限的网关，省略也几乎必然当无限）。
+- 加 `BLAMEFALL_EXTRA_BODY`（env，JSON）逃生舱：合并进请求体、固定字段优先不可篡改路由。下次再遇网关怪癖（思考型关思考 `{"thinking_budget":0}` / `{"reasoning_effort":"low"}` 等），改 env 即可，不必改代码、不必再等一轮「修了又修」。
+- `empty_content` 日志补 `model` 与 `max_tokens_sent=(omitted)`，服务端一眼看出是不是这颗地雷。
+
+**本轮根治（防复发）——可观测性：再没有静默失败（`engine/api.js`）。** 新增 `lastError` + `getLastError()`：`judgeFree` 在**每一道**闸门失败时都记下精确原因再落兜底——`offline_gate / client_timeout / http_402 / empty_content（含 usage）/ validate_rejected（含原文片段）/ unreachable`，成功则清空。`game.js` 把它接进开发者面板（按 `` ` `` 键）：自由输入落兜底时打印「AI 失败=empty_content(usage=…)」，热路径取不到 AI 锅时打印「缓冲空 → 落静态锅（buf=… · 上次错误=…）」。**从此「无 AI」不再是看不见的黑箱**：下次复现，按一下 `` ` `` 或点「检测」就能读到确切闸门，不用再猜、不用再盲修一轮。
+
+- 浏览器实证（stub fetch）：502+empty_content → `lastError.code=empty_content, detail=usage={completion_tokens:0,…}`（**0 completion tokens 正是 max_tokens 地雷的铁证**）；200 合法 → 有结果且 `lastError=null`；非法 argument_type → `validate_rejected`+原文；402 → `http_402`。
+
+**顺带加固（①的另一种可能）——`validate` 容错数字字符串。** gemini 经某些网关会把 `persuasiveness` 输出成 `"82"`（字符串），旧校验 `typeof!=="number"` 一律拒 → 又一种「有记录却无 AI」。现在宽松强转一次（转不出有限数才拒），下游 `judge.js` 再 clamp。实证 `"82"` → 通过、S=82。
+
+**③ 冷启动暖机竞态（`game.js` boot）。** 旧代码把 `PotGen.prefetch(5)` 排在 `checkBackend().then()` 里。Vercel 冷启动下 health 探测要 8s 超时 + 0.7s + 重试 ≈ 17s 才 resolve，于是 genpot 函数直到 ~17s 后才开始冷启动唤醒、缓冲 ~25s 才有货——**正是「刚刷新就开局=无 AI、等一会儿=有 AI」**。改成**页面一加载就并行发预取**（`isOnline()` 在 `backend===null` 探测未回时乐观为 true，此刻就能发），让 genpot 在标题屏期间就暖起来；探测回来仅在缓冲仍空时补一次（避免每次加载双发 genpot 白烧 token）。实证：reload 后 1.6s 缓冲已暖（buf=2）、`next()` 返回 `gen-mock-1`（generated）。
+
+**空回复 bug（系统性根治，`engine/judge.js` + `data/npcs.js`）。** 抽象 NPC（天气/水逆/星座）只有 事实/情感/荒诞 三型专属台词，转移型/反向型回落到 `VERDICTS.generic`——而 generic 只有 technique/verdict、**没有 reaction 字段** → 气泡里「被甩锅者那句话」空白。不再逐条补数据（治标），而是让 `pickReaction(ai, success, npc)` **结构性地永不返回空串**：依次回落 `npc.fixedReaction` → 一句中性台词；并给三个抽象 NPC 各配 `fixedReaction`（沿用各自「官方腔」签名台词）。实证：天气×转移型（generic 回落）→ 判词正常、reaction=「今日风向复杂，气压偏低，本单位不予回应。」（非空）。
+
+**安全。** 本轮聊天里出现了一枚**明文真实 key**——已提醒用户立即到网关后台吊销/轮换；该 key **未**写入任何文件、记忆或提交，也**未**被用来调用网关（不烧用户 token）。教训：演示/排查一律走 env 或标题屏输入，绝不把 key 贴进任何会被记录的地方。
+
+**边界（诚实说）。** ① agent 机器够不着 `*.vercel.app`（大陆封锁）、也不会用那枚泄露 key 调真实网关，所以 `max_tokens` 修复**未能在真实网关上端到端跑通**——它是「代码 + 症状（有调用记录却无 AI）」吻合度最高的根因，且无论如何都是该拆的地雷。**真正的确认要靠新加的可观测性**：用户重新部署 Vercel 后若仍「无 AI」，按 `` ` `` 或点「检测」即可读到确切错误码——`empty_content` 说明仍是思考型/上限问题（配 `BLAMEFALL_EXTRA_BODY` 关思考或配正数 `max_tokens`）、`http_402` 是额度、`validate_rejected` 看原文片段是哪个字段。② 服务端改动（`api/_gateway.mjs`）需**重新部署**才生效。smoke 45/45 无回归。

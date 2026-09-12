@@ -220,6 +220,9 @@
     if (typeof PotGen !== "undefined" && PotGen.enabled()) {
       var gen = PotGen.next();
       if (gen) return gen;
+      // 热路径却取不到 AI 锅：把原因打进开发者面板（缓冲未暖好 / genpot 失败码），
+      // 让「锅是静态的」不再是看不见的静默降级。
+      devLog("AI 锅缓冲空 → 落静态锅（buf=" + PotGen.size() + " · 上次错误=" + (PotGen.lastError() || "无") + "）", "no");
     }
     var pool = POTS.filter(function (p) { return S.recentPots.indexOf(p.id) < 0; });
     if (!pool.length) { S.recentPots = []; pool = POTS.slice(); }
@@ -475,7 +478,9 @@
       var lib = FallbackEngine.lookup(n.id, t, VERDICTS);
       var s = FallbackEngine.computePersuasiveness(reason, t, n, p.def, ARGUMENT_TYPES);
       var det = FallbackEngine.computePersuasivenessDetailed(reason, t, n, p.def, ARGUMENT_TYPES);
-      devLog("兜底引擎 · 判为" + t + " · S=" + s + " [" + det.trace.join(" / ") + "]", "dim");
+      var why = (online && JudgeAPI.getLastError) ? JudgeAPI.getLastError() : null;
+      devLog("兜底引擎 · 判为" + t + " · S=" + s + " [" + det.trace.join(" / ") + "]" +
+        (why ? " · AI 失败=" + why.code + (why.detail ? "(" + why.detail + ")" : "") : ""), why ? "no" : "dim");
       lib.persuasiveness = s;
       return { argType: t, ai: lib, source: online ? "fallback" : "offline" };
     });
@@ -1350,7 +1355,7 @@
       case "http_404": return "模型不存在（404），换个模型 ID";
       case "timeout": return "上游超时，稍后再试";
       case "unreachable": return "连不上网关，检查网络";
-      case "empty_content": return "模型只吐思维链不出正文（思考型），换非思考模型";
+      case "empty_content": return "模型只吐思维链、不出正文（思考型）。换非思考模型，或服务端配正数 max_tokens / 关思考参数";
       default: return code || "未知错误";
     }
   }
@@ -1363,13 +1368,20 @@
     initAiSet();
 
     updateMetaMode();
-    // 先探测后端真伪（静态宿主无 /api），再决定热路径预取与 badge 文案，
-    // 避免把「无后端」谎报成「作者兜底」。探测本身不带凭据。
+    // ── 暖机必须立刻、并行启动，绝不能排在 checkBackend 之后 ──
+    // 这是「刚刷新就开局=无 AI，等一会儿再开局=有 AI」的根因：Vercel serverless
+    // 冷启动下 checkBackend 的 health 探测可能要 8s 超时 + 0.7s + 重试 ≈ 17s 才 resolve，
+    // 旧代码把 prefetch 排在它后面，于是 genpot 函数直到 ~17s 后才开始冷启动唤醒，
+    // 缓冲要到 ~25s 才有货。改成页面一加载就并行发预取（isOnline() 在 backend===null
+    // 探测未回时乐观为 true，所以此刻就能发），让 genpot 在标题屏期间就暖起来。
+    // 静态宿主（Pages）会白吃一个 genpot 404，代价为零（catch 后落静态锅）。
+    if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(5);
+    // 探测后端真伪（静态宿主无 /api），据实刷新 badge 文案，避免把「无后端」谎报成「作者兜底」。
     JudgeAPI.checkBackend().then(function () {
       refreshAiStatus();
       updateMetaMode();
-      // 热路径：确认有后端才后台预取 AI 锅暖缓冲（失败/超时不影响静态锅）。
-      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(5);
+      // 仅当上面那次预取没填进货（被离线 gate 掉或失败）才补一次，避免每次加载都双发 genpot 白烧 token。
+      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined" && PotGen.size() === 0) PotGen.prefetch(5);
     });
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，
