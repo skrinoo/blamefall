@@ -87,6 +87,9 @@
       act: 1,
       nextSpawn: 1.0,
       holdLeft: HOLD_BUDGET,
+      holdMax: HOLD_BUDGET,     // 读秒条的分母；自由输入重置读秒时会变大
+      freeFocus: false,         // 输入框聚焦中 = 打字态
+      freeClockGranted: false,  // 本次开面板是否已发放过自由输入读秒
       panelOpen: false,
       busy: false,          // 判定/飞行动画期间锁输入
       over: false,
@@ -110,6 +113,40 @@
   var carryOver = { extraPots: 0, credit: 0, bestScore: 0, totalCatch: 0 };
 
   var dev = { metrics: false, slowmo: false, nodie: false };
+
+  // ─────────────── 自由输入读秒设置（localStorage 持久化）───────────────
+  // 0  = 打字时不读秒（握持预算冻结，锅仍随 0.12x 世界缓慢下落）
+  // N>0 = 聚焦输入框时把读秒重置为 N 秒（每次开面板只发一次）
+  var FREE_TIMER_KEY = "bf.freeTimerSec";
+  var freeTimerSec = 0;
+  function clampInt(v, lo, hi) { v = Math.round(v); return v < lo ? lo : (v > hi ? hi : v); }
+  function loadFreeTimer() {
+    var v = 0;
+    try { v = parseInt(localStorage.getItem(FREE_TIMER_KEY), 10); } catch (e) { v = NaN; }
+    freeTimerSec = isNaN(v) ? 0 : clampInt(v, 0, 120);
+    return freeTimerSec;
+  }
+  function saveFreeTimer(v) {
+    freeTimerSec = clampInt(isNaN(v) ? 0 : v, 0, 120);
+    try { localStorage.setItem(FREE_TIMER_KEY, String(freeTimerSec)); } catch (e) { /* 隐私模式忽略 */ }
+    return freeTimerSec;
+  }
+  function refreshFreeHint() {
+    var h = $("panel-free-hint");
+    if (!h) return;
+    h.textContent = freeTimerSec === 0
+      ? "自由输入读秒：不读秒（打字时握持预算冻结）"
+      : "自由输入读秒：" + freeTimerSec + "s（聚焦输入框时重置）";
+  }
+  function syncFreeTimerUI() {
+    var inp = $("set-freetimer");
+    if (inp) inp.value = String(freeTimerSec);
+    var btns = document.querySelectorAll(".set-presets button");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle("on", parseInt(btns[i].getAttribute("data-ft"), 10) === freeTimerSec);
+    }
+    refreshFreeHint();
+  }
 
   // ═══════════════════════ NPC 栏 ═══════════════════════
   function buildNpcBar() {
@@ -255,6 +292,9 @@
     S.held = p;
     p.state = "held";
     S.holdLeft = HOLD_BUDGET;
+    S.holdMax = HOLD_BUDGET;
+    S.freeClockGranted = false;
+    $("panel-input").value = "";   // 新抓一口锅 = 清空上局残留的理由
     p.el.classList.add("held");
     var hb = p.el.querySelector(".pot-hold i");
     if (hb) hb.style.width = "100%";
@@ -273,8 +313,10 @@
    */
   function burnHoldBudget(dtReal) {
     if (!S.held || S.busy) return;
+    // 打字态且设置=不读秒：握持预算冻结，让玩家安心写理由
+    if (S.freeFocus && freeTimerSec === 0) return;
     S.holdLeft -= dtReal * 1000;
-    var pct = clamp(S.holdLeft / HOLD_BUDGET * 100, 0, 100);
+    var pct = clamp(S.holdLeft / S.holdMax * 100, 0, 100);
     var hb = S.held.el.querySelector(".pot-hold i");
     if (hb) hb.style.width = pct + "%";
     var pt = $("panel-timer").firstElementChild;
@@ -320,6 +362,12 @@
     S.panelOpen = true;
     S.timeScale = 0.12;                 // 面板打开时几乎静止，但仍在流动
 
+    // 面板底边抬到 NPC 栏上沿：不遮头像，开着面板也能点头像换目标
+    var bar = $("npcbar");
+    if (bar) document.documentElement.style.setProperty("--npcbar-h", bar.offsetHeight + "px");
+    S.freeClockGranted = false;         // 换目标 = 换理由，重发读秒额度
+    refreshFreeHint();
+
     $("panel-pot-text").textContent = p.def.text;
     $("panel-target").innerHTML =
       '<div class="t-glyph">' + n.glyph + '</div><div class="t-name">' + n.name + '</div>';
@@ -345,10 +393,10 @@
       box.appendChild(b);
     });
 
-    $("panel-input").value = "";
     $("panel-timer").classList.add("on");
     $("panel").classList.add("open");
-    setTimeout(function () { if (S.panelOpen) $("panel-input").focus(); }, 260);
+    // 不自动聚焦输入框：选快速选项（键盘 1-5）时读秒照走，保留决策压力；
+    // 只有玩家真的点进输入框打字（focus）才按设置冻结/重置读秒。
     devLog("选目标 " + n.name + " · A=" + JudgeEngine.acceptanceOf(n, "事实型", engineState()) +
            " G=" + JudgeEngine.ownershipOf(p.def, n), "dim");
   }
@@ -1069,6 +1117,33 @@
       if (e.key === "Enter") { e.preventDefault(); throwFree($("panel-input").value); }
       e.stopPropagation();
     });
+    // 打字态读秒：聚焦=按设置冻结/重置读秒，失焦=恢复常规消耗
+    $("panel-input").addEventListener("focus", function () {
+      S.freeFocus = true;
+      if (freeTimerSec > 0 && S.held && !S.freeClockGranted) {
+        S.holdLeft = freeTimerSec * 1000;
+        S.holdMax = freeTimerSec * 1000;
+        S.freeClockGranted = true;
+      }
+    });
+    $("panel-input").addEventListener("blur", function () { S.freeFocus = false; });
+
+    // 标题屏：自由输入读秒设置（数字框 + 预设按钮）
+    $("set-freetimer").addEventListener("change", function () {
+      saveFreeTimer(parseInt(this.value, 10)); syncFreeTimerUI();
+    });
+    var presetBtns = document.querySelectorAll(".set-presets button");
+    for (var pi = 0; pi < presetBtns.length; pi++) {
+      presetBtns[pi].addEventListener("click", function () {
+        saveFreeTimer(parseInt(this.getAttribute("data-ft"), 10)); syncFreeTimerUI();
+      });
+    }
+    window.addEventListener("resize", function () {
+      if (S.panelOpen) {
+        var b = $("npcbar");
+        if (b) document.documentElement.style.setProperty("--npcbar-h", b.offsetHeight + "px");
+      }
+    });
 
     $("actor").addEventListener("click", catchSelf);
 
@@ -1123,6 +1198,7 @@
   function boot() {
     S = freshState();
     bind();
+    loadFreeTimer(); syncFreeTimerUI();
 
     var n = Object.keys(VERDICTS.entries).length;
     $("meta-mode").textContent = JudgeAPI.isOnline()

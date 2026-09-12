@@ -30,6 +30,18 @@
       <li class="secret">还有一个动作没人告诉你：把锅<b>拖回自己身上</b></li>
     </ul>
 
+    <div class="title-set">
+      <label for="set-freetimer">自由输入读秒</label>
+      <input id="set-freetimer" type="number" min="0" max="120" step="1" value="0">
+      <span class="unit">秒</span>
+      <span class="set-presets">
+        <button type="button" data-ft="0">不读秒</button>
+        <button type="button" data-ft="12">12s</button>
+        <button type="button" data-ft="24">24s</button>
+      </span>
+      <span class="set-hint">0 = 打字时不读秒（默认）</span>
+    </div>
+
     <p class="title-meta">
       <span id="meta-mode">离线模式 · 判定库 54 条</span>
       <span class="sep">|</span>
@@ -101,6 +113,7 @@
              placeholder="自己写一句理由（AI 实时裁判，写得越好甩得越远）" autocomplete="off">
       <button id="panel-send" class="btn btn-ghost">甩</button>
     </div>
+    <div class="panel-free-hint" id="panel-free-hint"></div>
     <button id="panel-close" class="panel-close" title="放手（锅会继续掉）">✕</button>
   </div>
 
