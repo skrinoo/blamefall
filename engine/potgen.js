@@ -27,12 +27,14 @@
   // cast 白名单，与 api/genpot.mjs 的 CAST_IDS、data/npcs.js 的 14 个 id 同源。
   var CAST_IDS = { didi: 1, roommate: 1, moyu: 1, xuezhang: 1, daoshi: 1, jiaowu: 1, fudaoyuan: 1, shitang: 1, ex: 1, tianqi: 1, shuini: 1, xingzuo: 1, future_self: 1, past_self: 1 };
 
-  var HIGH = 8;        // 缓冲高水位：达到就不再预取（省 token）
-  var LOW = 4;         // 低水位：next() 后低于它就后台补。补得早，慢生成才追得上快甩
-  var FETCH_N = 5;     // 每次请求几口锅（服务端 clamp 1..5，取满以提高单次回填量）
-  var MAX_BUF = 12;    // 缓冲硬上限，防止长时间挂着无限堆积
-  var MAX_CONCURRENT = 2;  // 并发预取上限：快甩时单条流水线追不上消耗，开第二条
-  var FETCH_TIMEOUT = 20000;
+  var HIGH = 6;        // 缓冲高水位：达到就不再预取（省 token）
+  var LOW = 3;         // 低水位：next() 后低于它就后台补。补得早，慢生成才追得上快甩
+  // 小批快跑：单次生成量↓ → 延迟↓成功率↑（n=5 一次上千 token、5~15s，又慢又易超时/超额度）。
+  // 单口锅质量由 prompt/模型决定，与批量无关 —— 拆小批不降质。
+  var FETCH_N = 2;     // 每次请求几口锅（服务端 clamp 1..5）
+  var MAX_BUF = 8;     // 缓冲硬上限，防止长时间挂着无限堆积
+  var MAX_CONCURRENT = 3;  // 并发预取上限：小批+多流水线，暖缓冲更快且追得上快甩
+  var FETCH_TIMEOUT = 9000;  // 慢请求 9s 即失败释放槽位→快速小批重试；对 n=2 足够，避免一条慢请求占槽 20s
 
   var buffer = [];
   var inflight = 0;    // 在途预取请求数（并发计数，不再是布尔）

@@ -1141,7 +1141,7 @@
     $("hud-act-name").textContent = ACTS[1].name;
     S.nextSpawn = 0.8;
     // 开局先后台预取一批 AI 锅填缓冲（热路径才发；失败/离线不影响下面的静态锅）。
-    if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(5);
+    if (typeof PotGen !== "undefined" && PotGen.enabled()) PotGen.prefetch(2);
     showScreen("screen-game");
     updateHud();
     refreshNpcBar();
@@ -1423,13 +1423,13 @@
     // 缓冲要到 ~25s 才有货。改成页面一加载就并行发预取（isOnline() 在 backend===null
     // 探测未回时乐观为 true，所以此刻就能发），让 genpot 在标题屏期间就暖起来。
     // 静态宿主（Pages）会白吃一个 genpot 404，代价为零（catch 后落静态锅）。
-    if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(5);
+    if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(2);
     // 探测后端真伪（静态宿主无 /api），据实刷新 badge 文案，避免把「无后端」谎报成「作者兜底」。
     JudgeAPI.checkBackend().then(function () {
       refreshAiStatus();
       updateMetaMode();
       // 仅当上面那次预取没填进货（被离线 gate 掉或失败）才补一次，避免每次加载都双发 genpot 白烧 token。
-      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined" && PotGen.size() === 0) PotGen.prefetch(5);
+      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined" && PotGen.size() === 0) PotGen.prefetch(2);
     });
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，
