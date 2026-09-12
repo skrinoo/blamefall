@@ -92,6 +92,7 @@
       freeClockGranted: false,  // 本次开面板是否已发放过自由输入读秒
       panelOpen: false,
       busy: false,          // 判定/飞行动画期间锁输入
+      paused: false,        // 暂停：主循环闸门关，世界时间全冻
       over: false,
       overReason: "",
       catchCount: 0,
@@ -148,6 +149,26 @@
     refreshFreeHint();
   }
 
+  // ─────────────── 场景契合软过滤设置（localStorage 持久化，默认关）───────────────
+  // 开：grabPot 时按 pot.cast 点亮 cast 内 NPC（发光 = 这口锅真牵扯到的人）、
+  // cast 外变暗（仍可点，甩过去正常结算 + offcast 彩蛋）。
+  // 关：完全不做高亮过滤；彩蛋属内容层，照旧触发。
+  var CAST_FILTER_KEY = "bf.castFilter";
+  var castFilter = false;
+  function loadCastFilter() {
+    try { castFilter = localStorage.getItem(CAST_FILTER_KEY) === "1"; } catch (e) { castFilter = false; }
+    return castFilter;
+  }
+  function saveCastFilter(on) {
+    castFilter = !!on;
+    try { localStorage.setItem(CAST_FILTER_KEY, castFilter ? "1" : "0"); } catch (e) { /* 隐私模式忽略 */ }
+    return castFilter;
+  }
+  function syncCastFilterUI() {
+    var cb = $("set-castfilter");
+    if (cb) cb.checked = castFilter;
+  }
+
   // ═══════════════════════ NPC 栏 ═══════════════════════
   function buildNpcBar() {
     var bar = $("npcbar");
@@ -163,7 +184,7 @@
         '<div class="npc-rel"><i style="width:100%"></i></div>' +
         '<div class="npc-fatigue">0</div>';
       chip.addEventListener("click", function () { onNpcClick(n); });
-      chip.addEventListener("mouseenter", function () { if (S.held && !S.panelOpen && !hasCast(S.held.def)) markTargetable(n.id); });
+      chip.addEventListener("mouseenter", function () { if (S.held && !S.panelOpen && !(castFilter && hasCast(S.held.def))) markTargetable(n.id); });
       bar.appendChild(chip);
       S.npcChip[n.id] = chip;
     });
@@ -344,7 +365,7 @@
     $("stage").classList.add("slowmo");
     $("actor").classList.add("armed");
     S.timeScale = 0.3;
-    applyCastFilter(p.def);
+    if (castFilter) applyCastFilter(p.def);
     devLog("抓 " + p.def.scene + " · 慢动作 0.3x · 握持预算 " + (HOLD_BUDGET / 1000) + "s" +
            (hasCast(p.def) ? " · cast=" + p.def.cast.join("/") : ""), "dim");
     toast(S.act === 1 ? "抓住了。选一个人。" : "抓住了，但别握太久。");
@@ -398,9 +419,9 @@
     if (!S.held) { toast("先抓住一口锅，才能甩给" + n.name + "。"); return; }
 
     S.target = n;
-    // 有 cast：保持「持续过滤高亮」，开着面板也能一眼看出这口锅牵扯到谁；
-    // 无 cast：清掉悬停留下的单个高亮。
-    if (!hasCast(S.held.def)) clearTargetable();
+    // 过滤开且有 cast：保持「持续过滤高亮」，开着面板也能一眼看出这口锅牵扯到谁；
+    // 其余情况：清掉悬停留下的单个高亮。
+    if (!castFilter || !hasCast(S.held.def)) clearTargetable();
     openPanel(n);
   }
 
@@ -879,6 +900,31 @@
     }
   }
 
+  // ═══════════════════════ 暂停 ═══════════════════════
+  // 暂停 = 主循环闸门关：世界时间 / 刷锅 / 下落 / 握持读秒一起冻住。
+  // 判定/飞行的 setTimeout 链走真实时间冻不住 —— 所以 busy 期间拒绝暂停入口，
+  // 避免「飞行中暂停、结算在遮罩后面自己跑完」。
+  function setPaused(on) {
+    if (!S || S.phase !== "playing" || S.over) return;
+    S.paused = !!on;
+    $("pause-overlay").hidden = !S.paused;
+    $("btn-pause").textContent = S.paused ? "▶" : "⏸";
+    devLog(S.paused ? "暂停 · 世界冻结" : "继续", "dim");
+  }
+  function togglePause() {
+    if (!S || S.phase !== "playing" || S.over) return;
+    if (S.paused) { setPaused(false); return; }
+    if (S.busy) { toast("等锅落地再暂停。", 1600); return; }
+    setPaused(true);
+  }
+  function quitToTitle() {
+    if (S) S.paused = false;
+    $("pause-overlay").hidden = true;
+    $("btn-pause").textContent = "⏸";
+    S.phase = "title";
+    showScreen("screen-title");
+  }
+
   // ═══════════════════════ 主循环 ═══════════════════════
   var lastTs = 0;
   function loop(ts) {
@@ -886,7 +932,7 @@
     var dtReal = Math.min((ts - lastTs) / 1000, 0.05);
     lastTs = ts;
 
-    if (S.phase === "playing" && !S.over) {
+    if (S.phase === "playing" && !S.over && !S.paused) {
       var scale = S.timeScale * (dev.slowmo ? 0.5 : 1);
       S.t += dtReal * scale;
       updateAct();
@@ -945,6 +991,8 @@
   function endGame(reason) {
     if (S.over) return;
     S.over = true;
+    S.paused = false;
+    $("pause-overlay").hidden = true;
     S.overReason = reason;
     S.phase = "report";
     S.timeScale = 1;
@@ -1135,6 +1183,8 @@
   function startGame() {
     S = freshState();
     S.phase = "playing";
+    $("pause-overlay").hidden = true;
+    $("btn-pause").textContent = "⏸";
     buildNpcBar();
     $("sky").innerHTML = "";
     $("hud-act").textContent = "第一幕";
@@ -1175,6 +1225,24 @@
     $("btn-start").addEventListener("click", startGame);
     $("btn-again").addEventListener("click", startGame);
     $("btn-home").addEventListener("click", function () { S.phase = "title"; showScreen("screen-title"); });
+
+    // ── 暂停：舞台按钮 + 遮罩三件 ──
+    // stopPropagation：暂停按钮在 #stage 里，不拦的话点它会被空白点击当成「放手锅」。
+    $("btn-pause").addEventListener("click", function (e) { e.stopPropagation(); togglePause(); });
+    $("btn-resume").addEventListener("click", function () { setPaused(false); });
+    $("btn-pause-settings").addEventListener("click", openSettings);
+    $("btn-quit").addEventListener("click", quitToTitle);
+
+    // ── 设置弹窗（统一入口，暂停遮罩里也能开）──
+    $("btn-settings").addEventListener("click", openSettings);
+    $("settings-close").addEventListener("click", closeSettings);
+    $("settings-modal").addEventListener("click", function (e) { if (e.target === this) closeSettings(); });
+    $("set-castfilter").addEventListener("change", function () {
+      saveCastFilter(this.checked);
+      // 握持中途改设置：立即生效/撤销，不等下一口锅
+      if (S && S.held) { if (castFilter) applyCastFilter(S.held.def); else clearTargetable(); }
+      devLog("场景契合软过滤 " + (castFilter ? "开" : "关"), "dim");
+    });
 
     $("panel-close").addEventListener("click", releasePot);
     $("panel-send").addEventListener("click", function () { throwFree($("panel-input").value); });
@@ -1217,13 +1285,19 @@
 
     document.addEventListener("keydown", function (e) {
       if (e.key === "`") { $("devpanel").classList.toggle("open"); return; }
+      if (e.key === "Escape" && !$("settings-modal").hidden) { closeSettings(); return; }
       if (!S || S.phase !== "playing") {
         if (e.key === "Enter" && S && S.phase !== "playing") {
           if ($("screen-title").classList.contains("is-active")) startGame();
         }
         return;
       }
-      if (e.key === "Escape") { if (S.panelOpen) releasePot(); return; }
+      if (e.key === "Escape") {
+        if (S.paused) { setPaused(false); return; }
+        if (S.panelOpen) releasePot(); else togglePause();
+        return;
+      }
+      if (S.paused) return;   // 暂停中冻结一切游戏按键（Esc 继续 / ` 面板 除外）
       if (S.panelOpen && /^[1-5]$/.test(e.key)) {
         var order = ["事实型", "情感型", "转移型", "反向型", "荒诞型"];
         var t = order[parseInt(e.key, 10) - 1];
@@ -1259,6 +1333,10 @@
     });
   }
 
+  // ═══════════════ 设置弹窗（统一入口）═══════════════
+  function openSettings() { $("settings-modal").hidden = false; }
+  function closeSettings() { $("settings-modal").hidden = true; }
+
   // ═══════════════ AI 凭据设置（标题屏）═══════════════════
   /**
    * 标题屏 AI 设置区：key / 模型输入 + 检测 + 保存/清除。
@@ -1276,6 +1354,9 @@
     var stored = false;
     try { stored = !!localStorage.getItem("bf.apiKey"); } catch (e) { /* ignore */ }
     $("ai-set").classList.toggle("first-run", !stored);
+    // 设置收进弹窗后：首跑提醒改成设置按钮红点，保存后消失
+    var sb = $("btn-settings");
+    if (sb) sb.classList.toggle("attn", !stored);
     if (!stored) {
       setAiHint("首次打开：可填自己的网关 Key（token 记你账上）；留空=用作者兜底（需开关开启）。", "");
     }
@@ -1294,6 +1375,8 @@
     $("ai-save").addEventListener("click", function () {
       JudgeAPI.setCredentials(keyEl.value, modelEl.value);
       $("ai-set").classList.remove("first-run");
+      var sbSave = $("btn-settings");
+      if (sbSave) sbSave.classList.remove("attn");
       refreshAiStatus();
       recheckAi();
       setAiHint("已保存到本机浏览器，下次打开不再询问。", "ok");
@@ -1417,6 +1500,7 @@
     S = freshState();
     bind();
     loadFreeTimer(); syncFreeTimerUI();
+    loadCastFilter(); syncCastFilterUI();
     initAiSet();
 
     updateMetaMode();

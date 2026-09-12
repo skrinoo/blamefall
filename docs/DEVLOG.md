@@ -1032,3 +1032,19 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 **浏览器实证（dev-server MOCK，`evaluate_script` 真点击驱动全链路）**：① 数据层：17 口锅 cast **全部合法**（id 均在 14 人白名单、无重复、场景语义正确）；② ex 判据 5 用例全过——ex+含 ex 的 cast 锅**不再弹回（复活）**、ex+不含 ex 的锅弹回、旧锅无 cast 回落 scene 相等/不等均正确、普通 NPC 无 scene 锁永不受限；③ 高亮分区：抓「自我管理」锅 → targetable=daoshi/jiaowu、offcast=其余 7 个 normal NPC、3 abstract + 2 self 两边都不进（2+7+5=14 ✓）；抓「就业压力」锅 → targetable=xuezhang/daoshi/jiaowu（正好 cast）；④ 彩蛋：点变暗的 didi（**确认可点**）→ 面板开 → 甩锅成功（+100 分、按正常规则结算无额外惩罚）→ `float hold` 飘出「（学弟学妹 战术后仰：这场景里根本没我）」。smoke 45/45 无回归。
 
 **边界（诚实说）**：① **彩蛋内容是占位**——用户明确说「待定」，当前实现是 `OFFCAST_EGG` 随机错位吐槽台词 + devLog，纯表现层、不改任何判定数值；想换成就/特殊台词/音效/关系惩罚，改 `game.js` 里 `OFFCAST_EGG` 与 `pickOffCastEgg` 即可，钩子已埋在 `finishThrow`。② AI 锅的 cast 质量依赖 v2 提示词，本地 MOCK 的 genpot 返回的 mock 锅**不带 cast**（走「不过滤」向后兼容路径），真 AI 锅的 cast 收敛度需部署后在真实网关上复验。③ 服务端改动（`api/genpot.mjs` + 新提示词）需**重新部署 Vercel** 才生效；`vercel.json` 的 `includeFiles: prompts/**` 已覆盖 v2，无需改配置。④ 本轮只做了本地提交，未推送。
+
+## 19. 设置收进统一弹窗 + 软过滤开关（默认关）+ 游戏内暂停（2026-09-12）
+
+**用户三条需求 + 一条补充**：① 软过滤加开关（附简短说明解释发光含义，默认关）；② 设置收进统一「⚙ 设置」按钮（简洁 UI，以后的设置也放这里）；③ 默认值：启用 AI 开 / API Key 留空 / 自由输入读秒 0（打字不读秒）；补充：增加游戏内暂停。
+
+**设置收拢**：标题屏 `.title-set`（读秒）与 `.title-ai`（AI 凭据）两块**原样搬进** `#settings-modal`（所有 ID 不变 → 既有绑定零返工）；标题屏只留一个 `⚙ 设置` 按钮，暂停遮罩里放第二入口。first-run「提醒填 Key」改为设置按钮红点（`#btn-settings.attn`，保存后消失）。关闭方式：✕ / 遮罩点击 / Esc。
+
+**软过滤开关**：`localStorage.bf.castFilter`，**默认关**。关 = grabPot 不调 applyCastFilter、mouseenter 回落旧的单个悬停高亮、NPC 栏无 offcast/targetable 分区；开 = 既有 cast 三态（发光 = 这口锅真牵扯到的人 / 变暗 = 场景不搭但仍可点 / 玄学与自已豁免）。offCast 彩蛋属内容层，**与开关无关照旧触发**（台词自解释错位）。握持中途改开关：立即生效/撤销。
+
+**暂停**：`S.paused` + 主循环一道闸门（`phase==="playing" && !S.over && !S.paused`），世界时间 / 刷锅 / 下落 / 握持读秒一起冻住；判定/飞行的 setTimeout 链走真实时间冻不住 → **busy 期间拒绝暂停入口**（toast「等锅落地再暂停」）。入口：舞台右上 ⏸（stopPropagation 防被「点空白=放手」误触）+ Esc 层级（关设置弹窗 > 继续暂停 > 放手锅 > 暂停）。遮罩三件：继续 / ⚙ 设置 / 回标题；暂停中冻结一切游戏按键（1-5 快速理由、1-9 选目标）。endGame / startGame / quitToTitle 三处重置遮罩与按钮字形，防跨局残留。
+
+**默认值核对（需求③零代码改动）**：`CFG.aiEnabled=true`、`CFG.apiKey=""`、`freeTimerSec=0`（打字不读秒）—— 代码原默认即用户要求值；清空 localStorage 浏览器实证：ai-on=checked / castfilter=unchecked / freetimer="0" / key 空 / 红点亮。
+
+**验证**：浏览器同步链路全绿（弹窗开闭与开关持久化 / Esc 层级 / 设置叠在暂停遮罩上层 / 回标题与新一局重置 / 过滤关时抓锅零分区）；暂停冻结实测受限于测试标签页在用户 Edge 中 hidden（rAF 停摆），按用户指示改**逻辑自检**：8 锚点逐一核对（freshState.paused / 三处 cast gate / 三处遮罩重置 / 握持中途立即生效）+ keydown 层级 + busy 拒绝 + z-index 层级（设置 60 > 暂停 50 > ⏸ 30）；smoke 45/45 无回归。玩家在可见标签页玩时，暂停=世界冻结是闸门行的直接推论。
+
+**改动清单**：`index.html`（设置搬弹窗 + ⏸ 按钮 + 暂停遮罩 + 设置弹窗 DOM）；`game.js`（castFilter 状态与三处 gate / 暂停三件 / keydown 层级 / 弹窗绑定 / 红点）；`style.css`（弹窗与暂停样式）。
