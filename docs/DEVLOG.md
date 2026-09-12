@@ -760,7 +760,14 @@ blamefall/
 入缓冲 2 口、`next()` 取出的锅五类型齐全 + targetRole 归一 + ownership 夹值 + 无说服度字段，
 `sanitize` 对缺正文/缺类型/非法角色/非数值 ownership 全部正确拒绝或归一；加载期 console 零报错。
 
-**尚未做**（下一步）：① 生产 `/api/genpot` 的真模型热路径待推送后掐表实测（受大陆波浪式封锁影响，需重试）。
+**生产实测**（2026-09-12，push 上线后掐表）：`GET https://blamefall-yy3a.vercel.app/api/genpot?n=2`
+→ **200**，端到端 5.3s（服务端上游 `latencyMs=2777`、`model=gemini-2.5-flash`），远低于 22s 超时与 Vercel 30s 函数上限。
+`/api/health` 同步确认 `configured/baseConfigured/keyConfigured` 均 true——生产跑的是热路径。
+两口生成锅逐项合格：五类型齐全、`targetRole` 与理由内容语义严格对应（事实/反向→npc、情感→self、转移→institution、荒诞→any）、
+`ownershipOverride` 只标主责对象且夹 [0,1]（moyu:0.8 / roommate:0.9）、**零数值判定字段**、id/scene 合法、中文流畅不重复。
+生成锅天然带 fit 语义 → §12 的契合度闭环在 AI 生成锅上同样成立。
+
+**尚未做**：暂无——AI 生成锅（热/冷双路径 + 预取缓冲）与契合度 fit 均已落地、平衡扇展重跑、生产热路径掐表验证通过。
 （原 ①「`computePersuasiveness` 还没吃 `targetRole`」已落地为契合度 fit，见 §12。）
 
 ---
