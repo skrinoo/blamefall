@@ -517,6 +517,13 @@ Error: api/health.mjs: unsupported "runtime" value in `config`: "nodejs20.x"
 Vercel 挂自定义域名保 AI 完整版（污染与黑名单都按域名匹配，换自有域名两层同时绕过）。
 查证方法与配置步骤记入 `docs/DEPLOY.md` §8。
 
+**同日修正：封锁是波浪式间歇，不是永久。** 午间复测同一台机器：
+`blamefall.vercel.app` 又 200 了；带哈希后缀的部署域名 `blamefall-yy3a.vercel.app`
+在封锁波里反而全程可达（probe min/median/max = 1289/1373/1537，全在 1850 预算内）；
+同一波里 `github.io` 可达而 `github.com:443` 的 push 断 —— 域名选择性进一步佐证匹配按域名。
+早上那段的每一句在当时都真，但外推成「永久双层封锁」就错了 —— **间隔复测才是可达性的唯一证据**。
+结论不变且更强：不赌单链接，README 挂三条（Pages 保底 / 项目域名 / 哈希部署域名备用）。
+
 ### 工具层的两个约束
 
 | 约束 | 应对 |
@@ -641,7 +648,7 @@ blamefall/
 | `/api/judge` 端到端延迟 | ✅ 已实测 | 2026-09-11 生产 probe：min/median/max = 1560/1711/2207ms 无错误码；1350ms 预算击穿，按 DEPLOY.md §4 重算为 timeout 1850 / flightMs 2000 |
 | 公开仓库 + README | ✅ 已推送 | `skrinoo/blamefall` 公开（已改名）；密钥扫描三条正则：真密钥形状 0 命中 |
 | Vercel 部署 | ✅ 已上线 | `blamefall.vercel.app`；首次部署栽在 `config.runtime: "nodejs20.x"`（Vercel 只认 edge），删键后 Git 集成自动重部署成功；health 三绿 |
-| 大陆可达性 | ✅ 双链接 | 2026-09-12 实测 vercel.app 被 DNS 污染 + SNI RST 双层封锁；Pages 镜像 `skrinoo.github.io/blamefall/` 已上线且被封网络可达（含 1850 新预算）；Vercel 自定义域名配置中 |
+| 大陆可达性 | ✅ 多链接 | 封锁为波浪式间歇（波内 DNS 污染 + SNI RST，窗口期全绿）；Pages 镜像 + 项目域名 + 哈希部署域名三条入 README；生产冒烟 28/28 全绿 |
 | 截图验证 | ✅ 已补 | MCP 的 `take_screenshot` 确认不可用（无头实例 `attached=false`，与 IDE 预览面板是两回事）；改为用户手动截图 + `stitch-shots.ps1` 拼接卷宗页（overlap=616 行 / xoff=5px，接缝不可见） |
 | `aiping` 网关 HTTP 402 | 🔴 阻塞 | 余额不足，图像/音乐/TTS 增强层全部无法验证 |
 | 问卷调研 | ⚠️ 未做 | 「问题与用户洞察 25 分」需要证据支撑 |

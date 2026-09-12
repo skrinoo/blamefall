@@ -295,16 +295,20 @@ $env:BLAMEFALL_API_KEY  = '<密钥>'
 
 ---
 
-## 8. 大陆可达性：为什么必须双链接
+## 8. 大陆可达性：为什么必须多链接
 
-2026-09-12 实测，`*.vercel.app` 在大陆网络被**双层封锁**：
+2026-09-12 实测，大陆网络对 `*.vercel.app` 与 `github.com:443` 的封锁是
+**波浪式间歇**的：封锁波内双层封锁，窗口期内同一台机器全绿。
 
 | 层 | 现象 | 判定方法 |
 |---|---|---|
 | DNS | `blamefall.vercel.app` 解析出 `2a03:2880:*:face:b00c:*`（Meta 段）与 `199.96.58.x`（Twitter 段）；**查 8.8.8.8 / 1.1.1.1 也被中途伪造** | `Resolve-DnsName -Server 8.8.8.8` |
 | SNI | 直连 Vercel 真 IP `76.76.21.21:443` TCP 通，但 TLS 握手在 ClientHello 带 SNI 时被 RST 强断 | 手写 `SslStream.AuthenticateAsClient` 探针 |
+| 窗口期 | 同一台机器 09-11 晚与 09-12 午间都拿到过 200 全绿 | 同 URL 间隔复测 |
+| 域名选择性 | 同一封锁波内 `github.io` / `api.github.com` / `*.vercel.app` 可达，而 `github.com:443`（git push）断 | 并行实测 |
 
-2026-09-11 拿到的 200 是窗口期。**评委大概率在大陆网络，单挂 vercel 链接等于赌运气。**
+2026-09-11 拿到的 200 是窗口期，当天的超时是封锁波 —— 两者都是真的。
+**评委大概率在大陆网络，单挂任何一个 vercel 链接都是赌运气。**
 
 ### 保底链接：GitHub Pages 镜像
 
@@ -326,3 +330,11 @@ $env:BLAMEFALL_API_KEY  = '<密钥>'
 2. 域名商后台加 `CNAME  blamefall  →  cname.vercel-dns.com`
 3. Vercel 自动签 Let's Encrypt 证书；签发后客户端 `autoSameOrigin()` 直接用新域名，**代码零改动**
 4. 验证（在被封的机器上 = 大陆评委替身）：DNS 应解析到 Vercel 真 IP、SNI 握手应成功、`/api/health?probe=3&budget=1850` 应全绿
+
+### 备用链接：带哈希后缀的部署域名
+
+每次 Vercel 部署还会得到一个独立域名串（如 `blamefall-yy3a.vercel.app`）。
+封锁按域名匹配，波浪不一定同时覆盖所有串 —— 09-12 午间封锁波里
+项目域名打不开时它实测 200，probe min/median/max = 1289/1373/1537 全在 1850 预算内。
+**代价**：哈希域名钉死在某一次部署上，下次 push 后它服务的是旧版本；
+所以它只作「打不开时试试」的备用，提交前记得核对它对应的版本。

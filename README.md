@@ -267,8 +267,9 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 | `/api/judge` 服务端 | ✅ 已部署（`blamefall.vercel.app`，health 三绿；生产 probe median 1711ms） |
 | 在线链路验证 | ✅ 本地 29/29 断言全绿 + 浏览器端到端实测（见下） |
 | 图像 / 音乐 / TTS 增强 | ⚠️ 未做（可用网关余额不足） |
-| 演示链接（AI 裁判完整版） | `https://blamefall.vercel.app/` —— ⚠️ `*.vercel.app` 在大陆网络被 DNS+SNI 双层封锁（2026-09-12 实测，见 [`docs/DEPLOY.md`](docs/DEPLOY.md) §8），可达性取决于评委网络；自定义域名配置中 |
+| 演示链接（AI 裁判完整版） | `https://blamefall.vercel.app/` —— ⚠️ `*.vercel.app` 在大陆网络被**波浪式间歇封锁**（2026-09-12 封锁波内实测 DNS 污染 + SNI RST 双层；窗口期全绿），见 [`docs/DEPLOY.md`](docs/DEPLOY.md) §8；自定义域名配置中 |
 | 演示链接（保底可玩版） | `https://skrinoo.github.io/blamefall/` —— GitHub Pages 镜像，大陆可达；自由输入自动降级本地兜底裁判，其余体验一致 |
+| 演示链接（AI 备用域名） | `https://blamefall-yy3a.vercel.app/` —— 带哈希后缀的部署域名；09-12 午间封锁波里项目域名打不开时它实测可达。注意：它钉死在提交时的部署版本上 |
 
 ### 在线链路验证到什么程度了
 
