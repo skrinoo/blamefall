@@ -74,12 +74,15 @@
   <main id="stage">
     <button id="btn-pause" class="pause-btn" title="暂停（Esc）" type="button">⏸</button>
     <div id="sky"></div>
+    <div id="ring"></div>
 
     <div id="actor" title="点自己＝接锅">
       <div class="actor-hands">🙌</div>
       <div class="actor-body">🧍</div>
       <div class="actor-name">你</div>
     </div>
+
+    <div id="ending-note" hidden>没有其他人了</div>
 
     <div id="fx"></div>
   </main>
@@ -119,6 +122,9 @@
 
   <!-- 崩溃 / 结束遮罩 -->
   <div id="flash" class="flash"></div>
+
+  <!-- 紧→高潮 渐黑转场 -->
+  <div id="blackout"></div>
 
   <!-- 暂停遮罩 -->
   <div id="pause-overlay" class="pause-overlay" hidden>

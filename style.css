@@ -757,6 +757,69 @@ table.log .tech { color: var(--ink); }
 }
 .dev-tools label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 
+/* ═══════════════════════ 高潮 · 环阵 ═══════════════════════ */
+#ring { position: absolute; inset: 0; z-index: 9; pointer-events: none; }
+#ring .npc { position: absolute; pointer-events: auto; }
+#sky, #ring { transition: transform .6s ease; }
+.climax #sky, .climax #ring { transform: scale(.82); }   /* 视角拉远 */
+/* #npcbar 是 #stage 的兄弟 footer，必须用兄弟选择器（后代选择器不匹配） */
+#stage.climax ~ #npcbar, #stage.ending ~ #npcbar { display: none; }
+.climax #actor {
+  left: 50%; top: 50%; bottom: auto;
+  transform: translate(-50%, -50%) scale(.82);
+  z-index: 10;
+}
+.climax #ring .npc { width: 64px; }
+.climax #ring .npc .npc-glyph { font-size: 24px; }
+.climax #ring .npc .npc-name { font-size: 9px; }
+.climax #ring .npc .npc-rel, .climax #ring .npc .npc-fatigue { display: none; }
+/* 主角光源：高潮/结尾都强化光晕（安全圈内不放任何可点元素，由环半径下限保证） */
+.climax #actor .actor-body, .ending #actor .actor-body {
+  filter: drop-shadow(0 0 26px rgba(255, 244, 214, .95));
+}
+
+/* ═══════════════════════ 结尾 · 只剩你 ═══════════════════════ */
+.ending #ring .npc { opacity: 0; pointer-events: none; transition: opacity 1.5s ease; }
+.ending #sky, .ending #ring { transform: none; }
+#ending-note {
+  position: absolute; left: 0; right: 0; bottom: 26px; z-index: 11;
+  text-align: center; font-size: 12px; letter-spacing: .5em; color: var(--ink-faint);
+}
+.pot.fadeout { transition: opacity .9s ease; opacity: 0; pointer-events: none; }
+.pot.ending-pot {
+  /* 最后一锅 = 像素风平底锅图像：去掉卡片外壳（底/边框/内边距），
+     紫光改用 drop-shadow 随锅轮廓走（box-shadow 会画出一个矩形光框） */
+  width: 240px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transform: translate(-50%, 0);
+  transform-origin: center bottom;
+}
+.pot.ending-pot .pot-pan {
+  display: block; width: 100%; height: auto;
+  animation: panGlow 2.4s ease-in-out infinite;   /* 呼吸紫光 = 「只剩这一口锅」的仪式感 */
+}
+.pot.ending-pot.held .pot-pan { animation: none; filter: drop-shadow(0 0 18px rgba(240, 165, 44, .75)); }
+.pot.ending-pot .pot-hold { display: none; }      /* 握持条在图锅上没有附着点，读秒改看面板计时条 */
+@keyframes panGlow {
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(155, 120, 255, .4)); }
+  50%      { filter: drop-shadow(0 0 24px rgba(155, 120, 255, .8)); }
+}
+
+/* ═══════════════════════ 紧→高潮 渐黑转场 ═══════════════════════ */
+#blackout {
+  position: fixed; inset: 0; z-index: 70; background: #04060a;
+  opacity: 0; pointer-events: none; transition: opacity .8s ease;
+}
+#blackout.on { opacity: 1; pointer-events: auto; }
+
+/* ═══════════════════════ 结尾下滑入卷宗 ═══════════════════════ */
+body.slid #screen-report { animation: reportSlideIn .9s cubic-bezier(.25, .7, .3, 1); }
+@keyframes reportSlideIn { from { transform: translateY(100%); } to { transform: none; } }
+
 /* ═══════════════════════ 响应式 ═══════════════════════ */
 @media (max-width: 720px) {
   .title-main { font-size: 44px; letter-spacing: .1em; }

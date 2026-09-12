@@ -1062,3 +1062,65 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 **验证（浏览器同步链路实测，AI 关走查表）**：数据层 NPCS.length=15 / 判定库 59 条含 suguan 五键 / 三宿舍锅 cast 含 suguan；交互层 chips=15（开局后）/ 宿管阿姨 idx=8；甩锅实测：抓 MOCK 锅点宿管→事实型→甩锅成功 +140 分（=100×1.4 精确）、technique「值班簿对账」、verdict、reaction「本子上确实漏记了一笔……行，这锅我背。」三段全弹出。smoke 45/45 无回归。
 
 **改动清单**：`data/npcs.js`；`engine/potgen.js`；`api/genpot.mjs`；`prompts/genpot-v2.txt`；`data/pots.js`；`data/verdicts.js`。服务端白名单+提示词变更随 push 触发 Vercel 重新部署生效。
+
+## 21. 四阶段重构：爽-紧-高潮-结尾，把「甩锅爽游」收束成「一个人背锅」的终幕（2026-09-12）
+
+**动机（用户设计）**：旧的三幕只是「越来越快」，情绪是一条单调上升线，收尾突兀。用户要把它拆成四阶段并给每一幕明确的**空间语言**——爽（剩余 60-40s）/ 紧（40-20s）/ 高潮（20-5s）/ 结尾（5-0s）。核心叙事转向：前面甩得越爽，结尾越要你一个人把锅背起来。玩法上「甩锅爽游」，立意上「一堂教你接锅的课」，终幕是这句话的落点。
+
+**设计确认链（先出图后写码）**：用户要求高潮幕的位置关系先出概念图确认再实现。用 openai-next 的 gpt-image-2.5 生成 v1（`docs/concepts/1789214622_*.png`）→ 用户三点反馈（环收近留缝防误触、锅八向逐口而非进幕八口、结尾补一行小字）→ v2（`docs/concepts/1789215175_*.png`，纯色底/环半径≈48%屏高/仅 3 口锅示意）→ 用户「差不多这样的位置关系」→ 用户发红笔标注图（红圈圈主角、主角正下方红框）→ AskUserQuestion 定稿：**红圈=主角安全区（圈内不放任何可点元素）**、**红框=其他角色大概位置（环比 v2 再收近）**。图确认后才动代码。
+
+**高潮幕实现**：`ACTS` 改四幕表（爽 spawnEvery 3.4/fallMs 5600/maxAir 1/acceptBonus 12；紧 2.1/4200/2/0；高潮 1.5/3200/3/0；结尾 999/7000/1/0）。主角 `#actor` 用 CSS 移到屏幕正中（`.climax #actor` left/top 50% + translate + scale .82）；15 个 chip 从底栏 `#npcbar` 搬进新容器 `#ring` 排环（`layoutRing` 按 `ang=-π/2+i·2π/15` 均布）。**环半径下限 = 防误触缝隙**：`ringRadius()=clamp(max(min(w,h)·0.16, NPCS.length·(CLIMAX_CHIP+14)/2π), 120, min(w,h)·0.34)`——下限保证 15 个 chip×(宽64+隙14) 放得进圆周，chip 不挨在一起；主角安全区（红圈）由「环半径 > chip 到心距离」天然保证圈内无可点元素。**视角拉远** = `.climax #sky, .climax #ring { transform: scale(.82) }`，逻辑尺寸不变（点击热区仍准），只是整体缩小便于同屏操作。**八向锅**：`spawnPot` 在 act3 从 8 个锚点（四边中点 + 四角，外 margin 150）随机选一向出生，速度向量指向环内随机落点（`rr=rand·ringRadius·0.5`），`mode="aim"`；`movePots` 的 aim 分支按 vx/vy 直线飞，锅中心距落点 <30px = `crashPot`（砸到自己）。**强调**：八向是「候选出生点」不是「进幕同时八口」，刷几口/何时刷仍由 spawnEvery 1.5s、maxAir 3 管。
+
+**紧→高潮转场**：新增 `#blackout`（fixed z-70，transition opacity .8s）。`enterClimax` 加 `.on` 渐黑 → 800ms 后在黑场中 `applyClimaxLayout`（搬 chip、排环）→ 移除 `.on` 亮起，全程≈1.6s，位置突变被黑场遮住，玩家只看到「灯一亮，所有人围住了你」。
+
+**结尾幕实现**：`enterEnding` 加 `.ending`（环上 chip `opacity:0` 1.5s 淡出 + `pointer-events:none`）、显示 `#ending-note`「没有其他人了」、残留锅 `.fadeout` 淡出清场（结尾不砸锅扣血）、+1200ms `spawnEndingPot`（selfish 锅、fallMs 7000、`vy=(groundY+120)/7` 缓落、`.ending-pot` 紫边、**落到地面不砸**：`movePots` 里 `if(p.endingPot){p.y=g;p.vy=0}` 悬停等抓）。`onNpcClick` 加 act4 守卫（点任何人 toast「没有其他人了。这口锅只能甩给你自己。」）；`catchSelf` 在 act4 转 `endingCarry`：气泡「甩 锅 失 败 / 自己背 / 这口锅，你自己背。」→ 2600ms 后 `endGame("time", true)` 带 slide。主角作为唯一光源由 `.ending #actor .actor-body { filter: drop-shadow(...) }` 强化。
+
+**滑入卷宗 + 自动滚**：`endGame(reason, slide)` → `renderReport` 末尾 `if(slide) slideIntoReport()`。`slideIntoReport`：`body.slid` 触发 `#screen-report` 的 `reportSlideIn .9s`（translateY 100%→0，画面向下滑入）；scrollTop 归零；wheel/touchmove/pointerdown(once) + window keydown(once) 任一即置 `stopped`；+950ms（等滑入动画结束）后 setInterval 16ms 缓动 `scrollTop += max(2, diff·0.07)` 直到 `diff≤2` 或 `stopped`；target=`scrollHeight-clientHeight`，`.report-wrap` 的 `padding-bottom:54px` = 用户要的「与屏幕底部留点缝隙」。**玩家有操作立即停自动滚、交还控制权**。
+
+**两个 bug（都在验证阶段抓到）**：
+① **npcbar 没隐藏**——CSS 写的是后代选择器 `.climax #npcbar`，但 `<footer id="npcbar">` 是 `<main id="stage">` 的**兄弟**不是后代，选择器根本不匹配。实测 `npcbarHidden:false` 暴露。改兄弟选择器 `#stage.climax ~ #npcbar, #stage.ending ~ #npcbar { display:none }`。
+② **滑入卷宗动画在真机会丢失**（隐藏标签页测试掩盖的真 bug）——loop 里原写 `if (S.act===4 && !S.endPotDone) S.t=ROUND; else endGame("time")`。可见标签页 rAF 正常跑：玩家一背锅，`endingCarry` 立即置 `endPotDone=true`，**下一帧** loop 就命中 `else endGame("time")`（**无 slide**）抢先把 `S.over=true`，而 `endingCarry` 自己 2600ms 后的 `endGame("time",true)`（**带滑入**）被 `if(S.over)return` 挡成空操作 → 滑入动画丢失。我的浏览器测试因标签页 hidden、rAF 停摆，只有 setTimeout 链在跑，**侥幸没触发这条竞态**。按设计「结尾不能自动结算、只能玩家亲手背」，act4 本就该永远冻结时钟、只由 endingCarry 驱动结算，故改为 `if (S.act===4) S.t=ROUND; else endGame("time")`，去掉 `!endPotDone` 条件——竞态从根上消除。
+
+**验证（浏览器同步链路 + __bf 钩子实测，隐藏页用 finish() 补动画时钟）**：
+- 高潮幕：`climaxClass:true` / `ringChips:15` / `chipDistFromCenter≈ringRadius`（layoutRing 数学正确）/ aim 锅 `mode:"aim"`、出生点 `spawnOutside:true`、落点 `targetDist 63 < R·0.5`（八向朝环心飞）/ `npcbarDisplay:"none"`（bug① 修复）/ sky·ring `finish()` 后 `matrix(0.82,…)`（视角拉远生效，之前的恒等矩阵是隐藏页 transition 时钟冻结的假象）。
+- 结尾幕：`endingClass:true` / note「没有其他人了」可见 / 结尾锅 `ending:true` / 抓锅 `held:true` / 甩主角→气泡「甩 锅 失 败」·「这口锅，你自己背。」 / `endPotDone:true` / **`overDuringBubble:false`**（气泡 2600ms 期间时钟冻结、未提前结算——bug② 修复的关键断言）→ **`overAfter:true`** / `bodySlid:true` / `reportActive:true` / 卷宗 `target:369` 可滚、同步驱动 49 格到底 `reached:368`、`padding-bottom:54px` 留缝。
+- 回归：smoke 45/45 全通过，无回归。
+
+**改动清单**：`game.js`（ACTS 四幕表 / spawnPot 八向 aim / movePots aim+结尾锅悬停 / updateAct 四幕 / ringRadius·layoutRing·applyClimaxLayout·enterClimax / enterEnding·spawnEndingPot·endingCarry / slideIntoReport / loop 时钟冻结 / onNpcClick·catchSelf·openPanel·spawnLogic·startGame·resize 适配 / __bf 钩子扩展）；`index.html`（`#ring`、`#ending-note`、`#blackout` 三处 DOM）；`style.css`（高潮环阵 / 结尾 / 渐黑转场 / 滑入卷宗 CSS 块 + 兄弟选择器修复）；`data/commentary.js`（acts 3 改高潮台词、新增 acts 4 终幕台词）。纯客户端改动，服务端零变更。
+
+## 22. Bug 修复：高潮锅穿过主角（坐标系不一致）+ 结尾锅对齐主角正上方并放大（2026-09-12）
+
+**动机（用户实测反馈）**：① 高潮幕从四面八方飞来的锅，有的直接穿过主角而不砸下；② 结尾幕最后一口锅应从主角正上方落下，且尺寸要再大一点。
+
+**Bug① 根因（两个叠加）**：（a）**坐标系不一致**——`.pot` 带 `transform: translate(-50%, 0)`，所以 `left` 值 = 锅的**视觉中心 x**（实测：styleLeft 366.569 → rect 中心 367）；但 `movePots` 的 aim crash 判定却用 `p.x + 95`（把 `p.x` 当成左上角、+半宽190/2），x 坐标凭空偏了 95px。后果：从右侧飞来的锅要越过主角 95px 才触发 crash——视觉上就是锅穿过主角。（b）**落点随机偏移**——旧实现落点取「环内随机点 `rr∈[0, ringRadius·0.5]`」，当落点偏在环心一侧、锅从对侧直线飞来时，路径会越过主角（环心）却只在「距落点<30」才 crash。
+
+**Bug① 修复**：落点改为精确对齐主角中心（`tx=w/2, ty=h/2`，climax 主角居屏幕正中），八向锅全部汇聚主角；crash 判定改用正确的视觉中心 `hypot(p.x - tx, (p.y+hh) - ty) < 48`（hh=锅半高≈42，offsetH 85/2）。锅沿直线飞向主角中心、在距中心 48px 内（锅体已覆盖主角）即 crash，数学上不可能越过。
+
+**Bug② 修复**：`spawnEndingPot` 重写——锅视觉中心 x 对齐主角中心（`p.x=w/2`，旧值是随机水平位），从 `y=-140` 缓落；悬停高度 `hoverY = h/2 - 38 - 18 - offsetH`（主角 scale(.82) 视觉半高≈38、留 18px 缝隙便于分别点击锅与主角），`movePots` fall 分支的落地判定改为 `p.endingPot ? p.hoverY : groundY()`。放大用 CSS `.pot.ending-pot { transform: translate(-50%,0) scale(1.3); transform-origin: center bottom }`——origin 底部锚定保证视觉底=布局底（`top+offsetH`），hoverY 计算不受 scale 影响，水平仍居中于 left。`endingCarry` 里加 `remove("ending-pot")`，避免放大的 scale 与 caught 动画的 transform 冲突。
+
+**验证（浏览器同步链路 + 轨迹积分，隐藏页用 finish() 补动画时钟）**：
+- Bug①：进高潮 spawn 8 口 aim 锅各自积分到 crash，`allTargetCenter:true`（落点都=主角中心 240,443）/ `allCrashNearCenter:true`（都在距中心<48 crash）/ `noOvershoot:true`（最小距离<48，未越过主角）；样本显示左下/上/左上角等不同方向的锅 crash 点都在主角周围 46-47px 汇聚。
+- Bug②：finish() 后主角居中 (240,443)、锅视觉中心 x=240 正上方对齐（`centerXAligned:true`）、锅底 387 在主角顶 405 上方 `gap:19`、锅放大 158×85→205×110（`scaledUp:true`）；缓落积分 `-140→hoverY 302`、7s 精确到位。
+- 回归：结尾完整链路（抓锅→甩主角→气泡「这口锅，你自己背。」→`overDuringBubble:false`→`overAfter:true`→`bodySlid`→卷宗滑入 target 369）全绿；`endingPotClassRemoved:true`、`caughtClass:true`；smoke 45/45；控制台零报错。
+
+**改动清单**：`game.js`（spawnPot aim 落点+速度 / movePots aim crash 判定 + fall 悬停 floor / spawnEndingPot 重写 / endingCarry 移除 ending-pot / __bf.pots() 扩展 vx·vy·hh·hoverY）；`style.css`（`.pot.ending-pot` 加 scale(1.3) + transform-origin）。纯客户端改动，服务端零变更。
+
+---
+
+## 23. 结尾体验三修：像素平底锅图锅、卷宗减速、气泡 0.2s 提前解锁
+
+**需求**（用户实机反馈）：① 结尾最后一锅不是具体的锅 → 换成平底锅图像（MCP 生图，确认后再执行）；② 卷宗自动下滑减慢；③ 甩锅后气泡快消失的最后 ≤0.2s 内能点下一口锅。
+
+**生图迭代链**（openai-next gpt-image-2.5，全程透明背景，System.Drawing 实测 Format32bppArgb、四角 A=0）：v1 卡通紫光煎锅 → 用户改：黑锅+木把/背面朝上/斜放露厚度/透明/别太卡通 → v2 半写实 → 用户改：木把转下面、像素风也行 → v3 16-bit 像素把朝左下 → 用户改：左右翻转 → v4 定稿。翻转用本地 System.Drawing 镜像（坑：枚举名是 `RotateNoneFlipX` 而非 `FlipX`；第一次用错枚举名报错却仍存了未翻转副本，重跑覆盖），存 `assets/ending-pan.png`（1024×1024、358KB），用户确认后集成。
+
+**集成实现**：
+- `spawnEndingPot`：innerHTML 换成 `<img class="pot-pan" src="assets/ending-pan.png" width=240 height=240>` + 保留握持条节点；**先 add class 再读 offsetHeight**（基础卡片样式宽190+内边距会读成 ≈265，hoverY 偏高 25px：实测 122→修复后 147）；出生点 y -140→-260（图锅高 240，整锅含透明边推出屏幕外）。
+- `enterEnding`：`new Image()` 预载平底锅图（spawn 在 1200ms 后，弱网不空帧）。
+- `endingCarry`：只 remove `held`、保留 `ending-pot`（卡片外壳靠该类去除；transform 已无 scale，与 caughtAnim 不冲突，移除反而闪回卡片底）。
+- CSS `.pot.ending-pot` 重写：去卡片外壳（background/border/padding/box-shadow）、width 240；紫光改 `drop-shadow` 随锅轮廓（box-shadow 会画矩形光框）+ `panGlow` 2.4s 呼吸；held 换琥珀色定光；握持条 display:none（读秒看面板计时条）。
+- 问题② `slideIntoReport`：`Math.max(2, diff*0.07)` → `Math.max(1, diff*0.035)`，下滑约慢一倍。
+- 问题③ `finishThrow` 收尾拆两段：解锁（busy=false/恢复常速/refreshNpcBar/breakdown 检查）提前到 `bubbleMs-200`，`hideBubble` 保持原时长；甩锅飞行 620ms > 200ms，新气泡必晚于旧气泡 hideBubble，无覆盖冲突。
+
+**验证**（浏览器、隐藏页）：几何 `imgLoaded(naturalWidth 1024)/240×240/hoverY 147/gapEl 18/cx 240=stageCX/panGlow in anim`；背锅链路 抓锅→点主角（catchSelf→act4→endingCarry；注意 ending 的 chip 已 pointer-events:none，合成 click 会绕过并误触空白放手分支，真机路径是点主角）→气泡「甩 锅 失 败/自己背」→potCls `pot ending-pot caught`（外壳不闪回）→over/bodySlid/report is-active/scrollTarget 369；问题③采样 3897ms 气泡 show=true 且新锅 held=true（尾窗可操作实证）、4891ms show=false；smoke 45/45；控制台零报错。
+
+**改动清单**：`game.js`（enterEnding 预载 / spawnEndingPot 换图+类序+出生点 / endingCarry 保留 ending-pot / finishThrow 两段收尾 / slideIntoReport 减速）；`style.css`（`.pot.ending-pot` 图像化重写 + panGlow）；新增 `assets/ending-pan.png`；`docs/concepts/` 生图迭代稿 ×4。纯客户端改动，服务端零变更。

@@ -60,10 +60,12 @@
   var SHADOW_BASELINE = 12;
 
   var ACTS = {
-    1: { name: "爽", from: 0,  to: 20, spawnEvery: 3.4, fallMs: 5600, maxAir: 1, acceptBonus: 12 },
-    2: { name: "紧", from: 20, to: 45, spawnEvery: 2.1, fallMs: 4200, maxAir: 2, acceptBonus: 0  },
-    3: { name: "停", from: 45, to: 60, spawnEvery: 3.6, fallMs: 7200, maxAir: 1, acceptBonus: -6 }
+    1: { name: "爽",   from: 0,  to: 20, spawnEvery: 3.4, fallMs: 5600, maxAir: 1, acceptBonus: 12 },
+    2: { name: "紧",   from: 20, to: 40, spawnEvery: 2.1, fallMs: 4200, maxAir: 2, acceptBonus: 0  },
+    3: { name: "高潮", from: 40, to: 55, spawnEvery: 1.5, fallMs: 3200, maxAir: 3, acceptBonus: 0  },
+    4: { name: "结尾", from: 55, to: 60, spawnEvery: 999, fallMs: 7000, maxAir: 1, acceptBonus: 0  }
   };
+  var ACT_LABEL = { 1: "第一幕", 2: "第二幕", 3: "第三幕", 4: "终幕" };
 
   // ═══════════════════════ 状态 ═══════════════════════
   var S = null;
@@ -85,6 +87,7 @@
       held: null,
       target: null,
       act: 1,
+      endPotDone: false,      // 结尾：最后一口锅是否已被「自己背」（决定时钟能否停 0 等待）
       nextSpawn: 1.0,
       holdLeft: HOLD_BUDGET,
       holdMax: HOLD_BUDGET,     // 读秒条的分母；自由输入重置读秒时会变大
@@ -247,8 +250,8 @@
       // 看上去像已经甩过一轮了。
       chip.querySelector(".npc-fatigue").textContent = t > 0 ? "-" + (n.fatigueStep * t) : "0";
       chip.classList.toggle("coldwar", JudgeEngine.inColdWar(n, engineState()));
-      // 第三幕把两个「自己」点亮
-      var isSelfTurn = (S.act === 3 && n.kind === "self");
+      // 结尾幕把两个「自己」点亮（高潮/结尾环阵上同样可见）
+      var isSelfTurn = (S.act === 4 && n.kind === "self");
       chip.classList.toggle("selected", isSelfTurn && !S.target);
     });
   }
@@ -265,11 +268,6 @@
 
   // ═══════════════════════ 锅 ═══════════════════════
   function choosePotDef() {
-    // 第三幕强制塞进「自己」相关的锅，让第四幕的主题落地
-    if (S.act === 3 && S.recentPots.length % 3 === 0) {
-      var selfPots = POTS.filter(function (p) { return p.selfish; });
-      if (selfPots.length) return pick(selfPots);
-    }
     // 热路径：缓冲里有 AI 预生成的锅就优先用（AI 在后台生成，此刻 0ms 取用，
     // 不卡锅落地）。缓冲空 / 离线冷路径 / 生成失败 → 自动落回下面的静态锅池，玩家无感。
     if (typeof PotGen !== "undefined" && PotGen.enabled()) {
@@ -292,13 +290,14 @@
     return pool[pool.length - 1];
   }
 
-  function spawnPot() {
+  function spawnPot(forceDef) {
     var stage = $("stage");
-    var def = choosePotDef();
+    var def = forceDef || choosePotDef();
     S.recentPots.push(def.id);
     if (S.recentPots.length > 5) S.recentPots.shift();
 
     var w = stage.clientWidth;
+    var h = stage.clientHeight;
     var node = el("div", "pot");
     node.innerHTML =
       '<div class="pot-top"><span class="pot-icon">' + POT_GLYPH + '</span>' +
@@ -311,11 +310,42 @@
       el: node,
       x: clamp(w * (0.14 + Math.random() * 0.68), 110, Math.max(120, w - 110)),
       y: -120,
+      vx: 0,
       vy: 0,
       fallMs: ACTS[S.act].fallMs,
+      mode: "fall",        // fall = 垂直下落 | aim = 高潮八向朝环心飞
       state: "falling"     // falling | held | flying | gone
     };
-    pot.vy = (groundY() + 120) / (pot.fallMs / 1000);   // px per game-second
+
+    if (S.act === 3 && !forceDef) {
+      // 高潮：锅不再只从天上掉，而是从八个方向（四边 + 四角）朝环心飞入。
+      // 强调：八向是「候选出生点」，不是进幕同时八口 —— 刷几口、何时刷仍由
+      // spawnEvery / maxAir 管（1.5s 一口、天上至多 3 口），这里只决定这一口从哪来。
+      var m = 150;
+      var anchors = [
+        [w * (0.3 + Math.random() * 0.4), -m],
+        [w + m, h * (0.3 + Math.random() * 0.4)],
+        [w * (0.3 + Math.random() * 0.4), h + m],
+        [-m, h * (0.3 + Math.random() * 0.4)],
+        [-m, -m], [w + m, -m], [w + m, h + m], [-m, h + m]
+      ];
+      var a = anchors[Math.floor(Math.random() * 8)];
+      // .pot 有 translate(-50%)：left = 视觉中心 x，top = 视觉顶 y
+      pot.x = a[0]; pot.y = a[1];
+      // 落点 = 主角中心（climax 主角居屏幕正中）。旧实现取「环内随机点」，
+      // 落点偏在环心一侧时、锅从对侧直线飞来会越过主角却只在距落点<30 才 crash，
+      // 视觉上锅直接穿过主角 —— 这里让所有锅精确汇聚主角，杜绝穿模。
+      pot.tx = w / 2; pot.ty = h / 2;
+      pot.hh = 42;                              // 锅视觉半高（offsetH≈85/2），中心对齐用
+      var sx = pot.x, sy = pot.y + pot.hh;      // 锚点处的锅视觉中心
+      var dist = Math.max(1, Math.hypot(pot.tx - sx, pot.ty - sy));
+      var sp = dist / (pot.fallMs / 1000);
+      pot.vx = (pot.tx - sx) / dist * sp;
+      pot.vy = (pot.ty - sy) / dist * sp;
+      pot.mode = "aim";
+    } else {
+      pot.vy = (groundY() + 120) / (pot.fallMs / 1000);   // px per game-second
+    }
 
     node.style.left = pot.x + "px";
     node.style.top = pot.y + "px";
@@ -334,9 +364,26 @@
     for (var i = S.pots.length - 1; i >= 0; i--) {
       var p = S.pots[i];
       if (p.state !== "falling") continue;
-      p.y += p.vy * dt;
-      p.el.style.top = p.y + "px";
-      if (p.y >= g) crashPot(p);
+      if (p.mode === "aim") {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.el.style.left = p.x + "px";
+        p.el.style.top = p.y + "px";
+        // 锅视觉中心 (left=x, top+半高) 飞到落点(主角中心) = 砸到自己。
+        // 旧判定用 p.x+95（误把 x 当左上角），与 translate(-50%) 矛盾→锅穿过主角才 crash。
+        var hh = p.hh || 42;
+        if (Math.hypot(p.x - p.tx, (p.y + hh) - p.ty) < 48) crashPot(p);
+      } else {
+        p.y += p.vy * dt;
+        p.el.style.top = p.y + "px";
+        // 结尾锅不砸：缓落到主角正上方悬停位(hoverY)停住，等玩家亲手抓起背到自己身上；
+        // 其余锅落到地面(groundY)即砸到自己。
+        var floor = p.endingPot ? p.hoverY : g;
+        if (p.y >= floor) {
+          if (p.endingPot) { p.y = p.hoverY; p.vy = 0; }
+          else crashPot(p);
+        }
+      }
     }
   }
 
@@ -414,6 +461,7 @@
   // ═══════════════════════ 甩 · 辩 ═══════════════════════
   function onNpcClick(n) {
     if (S.phase !== "playing" || S.busy || S.over) return;
+    if (S.act === 4) { toast("没有其他人了。这口锅只能甩给你自己。"); return; }
 
     // 没有握锅时点 NPC = 接锅教学提示；握着锅时 = 选目标
     if (!S.held) { toast("先抓住一口锅，才能甩给" + n.name + "。"); return; }
@@ -433,7 +481,11 @@
 
     // 面板底边抬到 NPC 栏上沿：不遮头像，开着面板也能点头像换目标
     var bar = $("npcbar");
-    if (bar) document.documentElement.style.setProperty("--npcbar-h", bar.offsetHeight + "px");
+    var bh = bar ? bar.offsetHeight : 0;
+    // 高潮/结尾底栏隐藏、环阵沉在台中：面板底边抬高，不遮环下方头像
+    if ($("stage").classList.contains("climax") || $("stage").classList.contains("ending"))
+      bh = Math.max(bh, Math.round($("stage").clientHeight * 0.3));
+    document.documentElement.style.setProperty("--npcbar-h", bh + "px");
     S.freeClockGranted = false;         // 换目标 = 换理由，重发读秒额度
     refreshFreeHint();
 
@@ -729,13 +781,16 @@
     }
 
     S.timeScale = 0.3;                  // 气泡期间保持慢速，让玩家读完
+    var bubbleMs = res.critical || res.caught ? 3200 : 2400;
+    // 提前 0.2s 解锁：气泡进入「快消失」的最后 200ms 就恢复操作，玩家能立刻去点
+    // 下一口锅。甩锅飞行 620ms > 200ms，新气泡必定晚于旧气泡 hideBubble，二者不冲突。
     setTimeout(function () {
-      hideBubble();
       S.busy = false;
       if (S.phase === "playing") S.timeScale = 1;
       refreshNpcBar();
       if (S.shadow >= 100 && !dev.nodie) endGame("breakdown");
-    }, res.critical || res.caught ? 3200 : 2400);
+    }, bubbleMs - 200);
+    setTimeout(function () { hideBubble(); }, bubbleMs);
 
     refreshNpcBar();
   }
@@ -747,6 +802,7 @@
     if (S.phase !== "playing" || S.busy || S.over) return;
     var p = S.held;
     if (!p) { toast("手里没有锅。接锅得先有锅可接。"); return; }
+    if (S.act === 4) { endingCarry(p); return; }   // 结尾：甩向主角 = 自己背
 
     closePanel();
     S.held = null;
@@ -868,25 +924,165 @@
   }
 
   function updateAct() {
-    var a = S.t < 20 ? 1 : (S.t < 45 ? 2 : 3);
+    var a = S.t < 20 ? 1 : (S.t < 40 ? 2 : (S.t < 55 ? 3 : 4));
     if (a === S.act) return;
     S.act = a;
-    $("hud-act").textContent = a === 1 ? "第一幕" : (a === 2 ? "第二幕" : "第三幕");
+    $("hud-act").textContent = ACT_LABEL[a];
     $("hud-act-name").textContent = ACTS[a].name;
     var line = $("hud-act").parentNode;
     line.classList.remove("switch"); void line.offsetWidth; line.classList.add("switch");
     toast(pick(COMMENTARY.acts[a]), 3400);
-    devLog("── 进入第" + a + "幕「" + ACTS[a].name + "」 接受度修正 " + fmt(ACTS[a].acceptBonus) + " ──", "dim");
-    if (a === 3) {
-      // 第三幕：把两个「自己」推到栏位最前，视觉上完成主题转折
-      ["past_self", "future_self"].forEach(function (id) {
-        var chip = S.npcChip[id];
-        if (chip && chip.parentNode) chip.parentNode.appendChild(chip);
-      });
-    }
+    devLog("── 进入" + ACT_LABEL[a] + "「" + ACTS[a].name + "」 接受度修正 " + fmt(ACTS[a].acceptBonus) + " ──", "dim");
+    if (a === 3) enterClimax();
+    if (a === 4) enterEnding();
+  }
+
+  // ═══════════════ 高潮 · 环阵（剩余 20-5s）═══════════════
+  // 位置关系由用户凭概念图确认：主角居屏幕正中（红圈 = 安全区，圈内不放
+  // 任何可点元素），其余角色环列贴近主角（红框 ≈ 0.16×短边），视角拉远 0.82；
+  // 锅从八向逐口飞入（见 spawnPot），不是进幕同时八口。
+  var CLIMAX_CHIP = 64;             // 环上头像逻辑宽（0.82 缩放后视觉≈52，适中可操作）
+  function ringRadius() {
+    var st = $("stage");
+    var m = Math.min(st.clientWidth, st.clientHeight);
+    // 下限 = 防误触缝隙：15 个 chip ×(宽+隙14) 必须放得进圆周，
+    // 否则 chip 挨在一起误触率飙升；上限防环出舞台。
+    var need = (NPCS.length * (CLIMAX_CHIP + 14)) / (2 * Math.PI);
+    return clamp(Math.max(m * 0.16, need), 120, m * 0.34);
+  }
+  function layoutRing() {
+    var st = $("stage");
+    var R = ringRadius();
+    var cx = st.clientWidth / 2, cy = st.clientHeight / 2;
+    NPCS.forEach(function (n, i) {
+      var chip = S.npcChip[n.id];
+      if (!chip || chip.parentNode !== $("ring")) return;
+      var ang = -Math.PI / 2 + i * (Math.PI * 2 / NPCS.length);
+      chip.style.left = (cx + Math.cos(ang) * R - CLIMAX_CHIP / 2) + "px";
+      chip.style.top = (cy + Math.sin(ang) * R - CLIMAX_CHIP / 2) + "px";
+    });
+  }
+  function applyClimaxLayout() {
+    if (!S || S.phase !== "playing" || S.over) return;
+    $("stage").classList.add("climax");
+    var ring = $("ring");
+    ring.innerHTML = "";
+    NPCS.forEach(function (n) {
+      var chip = S.npcChip[n.id];
+      if (chip) ring.appendChild(chip);
+    });
+    layoutRing();
+  }
+  function enterClimax() {
+    // 紧→高潮：渐黑(0.8s) → 黑场中换阵 → 亮起(0.8s)，全程≈1.6s
+    $("blackout").classList.add("on");
+    setTimeout(function () {
+      applyClimaxLayout();
+      $("blackout").classList.remove("on");
+      devLog("高潮阵 · 主角居中 · NPC 成环 · 视角拉远", "dim");
+    }, 800);
+  }
+
+  // ═══════════════ 结尾 · 只剩你（剩余 5-0s）═══════════════
+  function enterEnding() {
+    $("stage").classList.add("ending");
+    $("ending-note").hidden = false;
+    // 预加载结尾平底锅图：spawnEndingPot 在 1200ms 后才起，先预载避免弱网空帧
+    var pre = new Image();
+    pre.src = "assets/ending-pan.png";
+    // 高潮残留锅清场：淡出移除，结尾幕不砸锅扣血
+    S.pots.slice().forEach(function (p) {
+      if (p.state !== "falling") return;
+      p.el.classList.add("fadeout");
+      setTimeout(function () { removePot(p); }, 900);
+    });
+    setTimeout(function () { if (S && S.phase === "playing" && !S.over) spawnEndingPot(); }, 1200);
+    devLog("── 结尾 · 其他人淡出 · 只剩你和一口锅 ──", "umb");
+  }
+  function spawnEndingPot() {
+    var pool = POTS.filter(function (p) { return p.selfish; });
+    var p = spawnPot(pool.length ? pick(pool) : POTS[0]);
+    var stage = $("stage");
+    var w = stage.clientWidth, h = stage.clientHeight;
+    p.endingPot = true;
+    p.fallMs = 7000;
+    // 最后一锅不再是文字卡片：换成像素风平底锅图像（透明背景）。
+    // width/height 属性锁住布局尺寸，下面悬停位计算能同步读到 offsetHeight，不等图加载
+    p.el.innerHTML =
+      '<img class="pot-pan" src="assets/ending-pan.png" width="240" height="240" alt="" draggable="false">' +
+      '<div class="pot-hold"><i></i></div>';
+    // 先上类再读 offsetHeight：基础卡片样式（宽190+内边距）会把布局高读成 ≈265，悬停位会偏高
+    p.el.classList.add("ending-pot");    // CSS：去卡片外壳 + 紫光随锅轮廓（最后一口锅的仪式感）
+    // 从主角正上方落下：锅视觉中心 x 对齐主角中心（climax/ending 主角居屏幕正中）
+    p.x = w / 2;
+    p.y = -260;   // 图锅高 240，出生点要把整口锅（含透明边）完全推出屏幕外
+    // 悬停高度：锅底落到主角头顶上方（主角 scale(.82) 视觉半高≈38，留 18px 缝隙便于分别点击）
+    var potH = p.el.offsetHeight || 240;
+    p.hoverY = h / 2 - 38 - 18 - potH;
+    p.vy = (p.hoverY - p.y) / 7;         // 7s 缓落到悬停位
+    p.el.style.left = p.x + "px";
+    p.el.style.top = p.y + "px";
+    devLog("结尾锅 · 主角正上方缓落 · 可甩对象只剩你自己", "umb");
+    return p;
+  }
+  /** 结尾：把锅甩向主角 = 自己背。不加分不扣血，只给情绪落点，然后滑入卷宗 */
+  function endingCarry(p) {
+    closePanel();
+    S.held = null;
+    S.target = null;
+    $("stage").classList.remove("slowmo");
+    $("actor").classList.remove("armed");
+    S.busy = true;
+    S.endPotDone = true;
+    p.state = "flying";
+    p.el.classList.remove("held");   // 保留 ending-pot：卡片外壳靠该类去除，移除会让 caught 动画期间闪回基础卡片底；transform 已无 scale，与 caughtAnim 不冲突
+    p.el.classList.add("caught");
+    S.log.push({
+      t: S.t, scene: p.def.scene, pot: p.def.text, npc: "你自己", npcId: "self",
+      argType: "背", reason: "（没有理由）", technique: "自己背",
+      ok: false, crit: false, caught: false, reflected: false,
+      score: 0, shadow: 0, S: 0, A: 0, G: 1, P: 0, source: "ending"
+    });
+    showBubble({
+      kind: "umb", tag: "甩 锅 失 败", technique: "自己背",
+      verdict: "这口锅，你自己背。", reaction: "", metrics: ""
+    });
+    devLog("结尾 · 锅甩向主角 · 自己背", "umb");
+    setTimeout(function () {
+      if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+      var i = S.pots.indexOf(p);
+      if (i >= 0) S.pots.splice(i, 1);
+      hideBubble();
+      endGame("time", true);
+    }, 2600);
+  }
+
+  /** 结尾结算：画面下滑入卷宗，再自动滚到卷宗刚好展示完（底部留缝）；
+   *  玩家任何操作（滚轮/触摸/按键/按下）立即停自动滚，交还控制权 */
+  function slideIntoReport() {
+    document.body.classList.add("slid");
+    var sc = $("screen-report");
+    sc.scrollTop = 0;
+    var stopped = false;
+    function stop() { stopped = true; }
+    ["wheel", "touchmove", "pointerdown"].forEach(function (ev) {
+      sc.addEventListener(ev, stop, { once: true, passive: true });
+    });
+    window.addEventListener("keydown", stop, { once: true });
+    setTimeout(function () {
+      var target = sc.scrollHeight - sc.clientHeight;   // 滚到底 = 卷宗刚好展示完，CSS padding-bottom 留缝
+      if (target <= 0) return;
+      var iv = setInterval(function () {
+        if (stopped) { clearInterval(iv); return; }
+        var diff = target - sc.scrollTop;
+        if (diff <= 2) { clearInterval(iv); return; }
+        sc.scrollTop += Math.max(1, diff * 0.035);   // 减速：系数 0.07→0.035、最小步长 2→1，下滑更从容
+      }, 16);
+    }, 950);   // 等滑入动画（≈0.9s）结束再起滚
   }
 
   function spawnLogic(dt) {
+    if (S.act === 4) return;              // 结尾幕不刷新高锅，只剩那一口
     var cfg = ACTS[S.act];
     var inAir = S.pots.filter(function (p) { return p.state === "falling"; }).length;
     S.nextSpawn -= dt;
@@ -934,7 +1130,7 @@
 
     if (S.phase === "playing" && !S.over && !S.paused) {
       var scale = S.timeScale * (dev.slowmo ? 0.5 : 1);
-      S.t += dtReal * scale;
+      S.t = Math.min(ROUND, S.t + dtReal * scale);
       updateAct();
       spawnLogic(dtReal * scale);
       movePots(dtReal * scale);
@@ -943,7 +1139,14 @@
       // 握持预算：面板开不开都在扣，否则开着面板就能无限暂停全局
       burnHoldBudget(dtReal);
 
-      if (S.t >= ROUND) endGame("time");
+      if (S.t >= ROUND) {
+        // 结尾幕：时钟永远停在 0.0，绝不由 loop 自动结算 —— 只能玩家亲手把锅
+        // 甩向主角（endingCarry）来驱动 endGame(slide)。若在此处 endGame("time")，
+        // 会抢在 endingCarry 的 2600ms 滑入版之前把 S.over 置真，导致滑入卷宗动画丢失。
+        // （设计文档：结尾不能自动结算、不能淡出、不能跳过）
+        if (S.act === 4) S.t = ROUND;
+        else endGame("time");
+      }
     }
     requestAnimationFrame(loop);
   }
@@ -988,7 +1191,7 @@
   }
 
   // ═══════════════════════ 结算卷宗 ═══════════════════════
-  function endGame(reason) {
+  function endGame(reason, slide) {
     if (S.over) return;
     S.over = true;
     S.paused = false;
@@ -1011,7 +1214,7 @@
     carryOver.credit = S.credit;
     carryOver.bestScore = Math.max(carryOver.bestScore, S.score);
 
-    setTimeout(function () { renderReport(reason); }, reason === "breakdown" ? 1500 : 500);
+    setTimeout(function () { renderReport(reason, slide); }, reason === "breakdown" ? 1500 : 500);
   }
 
   function rankOf(score) {
@@ -1085,7 +1288,7 @@
     return items.slice(0, 4);
   }
 
-  function renderReport(reason) {
+  function renderReport(reason, slide) {
     var rank = rankOf(S.score);
     $("report-rank").textContent = rank.name;
     // 写整个 <p id="report-scoreline">，而不是写里面的 <b id="report-score">。
@@ -1165,6 +1368,7 @@
     }
 
     showScreen("screen-report");
+    if (slide) slideIntoReport();
     devLog("══ 结算 · " + rank.name + " · 得分 " + S.score + " · 阴影 " + Math.round(S.shadow) +
            " · 接锅 " + S.catchCount + " ══", "umb");
   }
@@ -1185,6 +1389,11 @@
     S.phase = "playing";
     $("pause-overlay").hidden = true;
     $("btn-pause").textContent = "⏸";
+    $("stage").classList.remove("climax", "ending");
+    $("blackout").classList.remove("on");
+    $("ending-note").hidden = true;
+    $("ring").innerHTML = "";
+    document.body.classList.remove("slid");
     buildNpcBar();
     $("sky").innerHTML = "";
     $("hud-act").textContent = "第一幕";
@@ -1221,6 +1430,28 @@
   }
 
   // ═══════════════════════ 事件绑定 ═══════════════════════
+  // 调试钩子（自动化自检用）：隐藏标签页 rAF 停摆时，幕切换/环阵只能经此同步驱动。
+  window.__bf = {
+    setAct: function (a) { if (S) S.act = a; },
+    enterClimax: enterClimax,
+    enterEnding: enterEnding,
+    spawnPot: spawnPot,
+    layoutRing: layoutRing,
+    ringRadius: ringRadius,
+    pots: function () {
+      return (S ? S.pots : []).map(function (p) {
+        return { mode: p.mode, state: p.state, x: Math.round(p.x), y: Math.round(p.y),
+                 vx: p.vx == null ? null : +p.vx.toFixed(1), vy: p.vy == null ? null : +p.vy.toFixed(1),
+                 hh: p.hh == null ? null : p.hh, hoverY: p.hoverY == null ? null : Math.round(p.hoverY),
+                 tx: p.tx == null ? null : Math.round(p.tx), ty: p.ty == null ? null : Math.round(p.ty),
+                 ending: !!p.endingPot };
+      });
+    },
+    state: function () {
+      return S ? { act: S.act, t: +S.t.toFixed(2), over: S.over, paused: S.paused,
+                   held: !!S.held, endPotDone: S.endPotDone, phase: S.phase } : null;
+    }
+  };
   function bind() {
     $("btn-start").addEventListener("click", startGame);
     $("btn-again").addEventListener("click", startGame);
@@ -1276,6 +1507,7 @@
         var b = $("npcbar");
         if (b) document.documentElement.style.setProperty("--npcbar-h", b.offsetHeight + "px");
       }
+      if ($("stage").classList.contains("climax")) layoutRing();
     });
 
     $("actor").addEventListener("click", catchSelf);
