@@ -104,7 +104,7 @@ export default async function handler(req, res) {
   }
 
   // 缺配置给 503（服务未开通，不是出错）。客户端据此判定「冷路径」。
-  if (!gatewayConfig().configured) {
+  if (!gatewayConfig(req).configured) {
     return send(res, 503, {
       error: { code: "gateway_not_configured", hint: "未配 BLAMEFALL_API_BASE/KEY，游戏自动用静态锅池。" },
     }, cors);
@@ -131,6 +131,7 @@ export default async function handler(req, res) {
     systemPrompt: prompt.text,
     userPrompt: "生成 " + n + " 口锅。只输出 JSON 数组，不要任何解释。",
     timeoutMs: GEN_TIMEOUT_MS,
+    req,
   });
 
   if (!r.ok) {
@@ -164,7 +165,7 @@ export default async function handler(req, res) {
     requested: n,
     returned: pots.length,
     latencyMs: r.latencyMs,
-    model: gatewayConfig().model,
+    model: gatewayConfig(req).model,
   }, cors);
 }
 

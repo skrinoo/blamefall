@@ -815,3 +815,81 @@ fit 分布：220 命中 / 392 错配 / 153 中性。fit 把各类型收窄成 **
 验证（2026-09-12）：五条探针符合设计意图（前任/学弟学妹情感型照过、室友迟到事实型被错配压低、
 教务处转移型契合）；`game.js` selfTest 新增 fit 三断言（late+roommate：反向型契合 / 事实型错配 / 荒诞型中性）
 boot 时打印 OK；加载期 console 零报错；smoke 29/29 无回归。
+
+---
+
+## 13. 自带 Key + 选模型 + 面板残影修复（2026-09-12）
+
+用户提了三件事：① 玩家能填自己的网关 Key（首次提醒、之后不再打扰）；② 填完能选模型并
+**检测模型是否真能用**，不能用要提醒；③ 修复截图里的 bug——甩过的锅（论证面板）收起后在下方留
+一条残影挡住 NPC 栏。前两件合成一条「请求级凭据覆盖」链路，第三件是一行 CSS 的几何账。
+
+### 13.1 请求级凭据覆盖：Key 记在玩家自己账上
+
+作者兜底的 Key 烧的是自己的网关余额，玩家一多必然撑不住。解法是让**每个请求自带凭据**：
+
+| 层 | 做法 |
+|---|---|
+| 客户端 `engine/api.js` | judge/genpot/probe 的 fetch 统一带 `x-bf-key` / `x-bf-model` 头（读 `localStorage` 的 `bf.apiKey` / `bf.model`）；留空则不带头 |
+| 服务端 `_gateway.mjs` | `gatewayConfig(req)` 优先读请求头、回落 env：`key = reqKey \|\| envKey`、`model = reqModel \|\| MODEL`；`keySource` 报「来源」（request/env/none）**但绝不报值** |
+| SSRF 防线 | **`base` 恒等于环境变量**，不接受请求级 `base`——允许玩家改上游地址等于开放 SSRF，坚决不做 |
+| 前端 UI `index.html`+`game.js` | 标题屏一块「AI 裁判 / 生成锅」设置区：Key 输入 + 模型 `datalist`（3 个常用）+「检测」按钮；没存过 Key 时高亮 + 一行提示（首次提醒），存过就自动回填、不再打扰；只落 `localStorage`，不上报任何地方 |
+
+**probe 的关键契约：上游失败也返回 200。** `/api/probe` 拿玩家当前的 Key/模型真调一句极简 prompt
+（`ping`→只回 `OK`），成功 `{ok:true, model, keySource, latencyMs, reply}`、失败 `{ok:false, error, model, keySource, latencyMs}`——
+因为「Key 无效 / 余额不足 / 模型不存在」是**要展示给用户的正常结论**，不是服务错误；用 4xx/5xx 反而会被前端
+当网络故障静默吞掉。只有 base+key 全缺才 503。前端把错误码翻译成中文提醒（401 Key 无效、402 余额不足、404 模型不存在、timeout 超时）。
+
+落地件：`api/probe.mjs`（新增）、`api/_gateway.mjs`（`gatewayConfig(req)` + `callGateway` 改用 `cfg.model`）、
+`api/judge.mjs`/`api/genpot.mjs`（透传 `req`）、`engine/api.js`+`engine/potgen.js`（带凭据头）、
+`index.html`+`game.js`+`style.css`（设置区 UI + 首次提醒）、`vercel.json`（probe 进 functions）、
+`scripts/dev-server.ps1`（MOCK 支持请求级凭据 + probe 路由 + 坏 Key 失败模拟前缀）、`scripts/smoke-test.ps1`（+16 条到 45）。
+
+### 13.2 验证阶段揪出的隐性 bug：`model: MODEL` 让「选模型」是假的
+
+功能表面全绿——probe 回显的 `model` 正确、UI 显示正确、smoke 也过。但细读 `callGateway` 发现它构造
+**真正发给上游的请求体**时写的是模块常量 `MODEL`，不是 `cfg.model`：
+
+```js
+// 修复前：玩家的 x-bf-model 被 gatewayConfig 读进 cfg.model、被 probe/judge/genpot 回显，
+// 但真正发给网关的调用始终用 env 默认模型 ——「选模型 + 检测」链路是假的。
+model: MODEL,      // ✗ 模块常量，永远是 env 默认
+model: cfg.model,  // ✓ 含请求级 x-bf-model 覆盖
+```
+
+即玩家选了 `gemini-2.5-pro`、probe 也回显 `gemini-2.5-pro`，实际调的却是 env 里的 `gemini-2.5-flash`。
+**回显值 ≠ 实际调用值**——覆盖链路必须一路追到真正发出的那个请求体才算数；中途任何一处回落到模块常量，
+都会让整条覆盖静默失效，而且测试全绿（因为测的是回显）。key 覆盖（`cfg._key`）本就正确，只有 model 漏了。
+
+顺带修了 `game.js` probeAI 的 `[object Object]`：503 的 `error` 是 `{code,hint}` 对象、200+ok:false 的 `error`
+是字符串码，原来一把拼进提示串会把对象拼成 `[object Object]`，改成统一取码（对象取 `.code`、字符串直接用）。
+
+### 13.3 面板残影：一行 CSS 的几何账
+
+截图里的 bug——论证面板收起后，NPC 栏上方留一条 ~78px 残影挡住角色。根因是两处位移没对齐：
+
+```
+.panel { bottom: var(--npcbar-h); }     /* 打开态被抬高 npcbar-h，避免压住 NPC 栏 */
+.panel { transform: translateY(105%); }  /* 关闭态却只下移「自身高度的 105%」 */
+```
+
+面板底边锚在 `npcbar-h` 高度处，关闭态只按自身高度往下移——顶部于是残留 `npcbar_h − 5%×panelH` 像素，
+正好盖在 NPC 栏上。修复是让关闭态把这段偏移一并补掉：
+
+```css
+transform: translate(-50%, calc(105% + var(--npcbar-h, 0px)));
+```
+
+**测量假象（踩了两轮）**：`.panel` 带 `transition: transform .26s`。在同一个同步 tick 里改 `--npcbar-h` + 切
+`.open` 再立刻 `getBoundingClientRect()`，读到的是过渡的起始/中间值——一度量出「关闭态 == 打开态 == 869px」的假象，
+误判修复无效、`.open` 不生效，硬重载 ignoreCache 也没用。正确测法有两条：① `panel.style.transition='none'` +
+`void panel.offsetHeight` 强制 reflow，取瞬时稳定值；② 干脆走真实游戏流程（抓锅→点 NPC→`openPanel` 先写
+`--npcbar-h` 再 `.open`；选理由→`throwQuick`→`closePanel`，此时 var 早已稳定）。**教训：测带 CSS 动画的稳定态，
+必须先禁用 transition 或走真实事件路径，不能在动画中途取样。**
+
+验证（2026-09-12）：真实甩锅流程实测收起后 `translateY=522.725px`（= 105%×panelH 404.5 + 98px npcbar-h）、
+面板 top=968 恒在 viewport(948) 之下、`panelOverlapsNpcbar=false`；对比修复前 `translateY=424.7`→top=870 会在
+NPC 栏（850–948）留 ~78px 残影，与截图那条完全对上。5 条 AI 设置 UI 流程全绿（首次高亮提醒 / 好 Key 检测
+「✓ 模型可用」/ 坏 Key 401·402·404 三种中文提醒 / 保存落 localStorage / 刷新持久化不打扰 / 清除回落作者兜底）；
+dev-server 日志确认浏览器真实请求 `key=request` + model 覆盖生效；smoke 29→**45/45** 全绿（新增 genpot/probe
+与请求级凭据覆盖断言，含「坏 Key 仍返回 200」「响应不回显 Key 明文」）。

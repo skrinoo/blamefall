@@ -60,13 +60,14 @@ function Check([bool]$cond, [string]$name, [string]$detail, [string]$failDetail)
 # 取响应。必须自己从 RawContentStream 按 UTF-8 解码 ——
 # 网关/本地服务器常不发 charset，PowerShell 5.1 会把 UTF-8 当 Latin-1 解，
 # 中文全成乱码，然后断言会以一个莫名其妙的理由失败。
-function Get-Raw([string]$url, [string]$method, [byte[]]$bodyBytes) {
+function Get-Raw([string]$url, [string]$method, [byte[]]$bodyBytes, $headers) {
     try {
         $p = @{ Uri = $url; Method = $method; UseBasicParsing = $true; TimeoutSec = 40 }
         if ($bodyBytes) {
             $p.Body = $bodyBytes
             $p.ContentType = 'application/json; charset=utf-8'
         }
+        if ($headers) { $p.Headers = $headers }
         $r = Invoke-WebRequest @p
         return [pscustomobject]@{
             Status  = [int]$r.StatusCode
@@ -217,6 +218,74 @@ Write-Host '5. 安全' -ForegroundColor Yellow
 $all = @(($r.Text), ($r2.Text), ($r3.Text)) -join "`n"
 Check (-not ($all -match 'sk-[A-Za-z0-9]{8,}')) '所有 judge 响应不含密钥样式字符串' ''
 Check (-not ($all -match 'Bearer\s+[A-Za-z0-9]')) '所有 judge 响应不回显 Authorization' ''
+
+# ─────────────────────────────────────────────
+Write-Host ''
+Write-Host '6. /api/genpot（AI 生成锅缓冲）' -ForegroundColor Yellow
+# ─────────────────────────────────────────────
+
+# genpot 失败也静默（客户端落回静态锅池），所以必须独立验证它真的通了。
+$r = Get-Raw "$BaseUrl/api/genpot?n=2" 'GET'
+Check ($r.Status -in 200, 503) 'genpot 可达（200 或 503 未配置）' "status=$($r.Status)" "status=$($r.Status) err=$($r.Error)"
+
+if ($r.Status -eq 200 -and $r.Text) {
+    $gp = $null
+    try { $gp = $r.Text | ConvertFrom-Json } catch { }
+    Check ($null -ne $gp) 'genpot 返回合法 JSON' '' 'JSON 解析失败'
+    if ($gp) {
+        Check ($gp.pots -is [Array] -and $gp.pots.Count -ge 1) 'genpot 返回 pots 数组' "count=$($gp.pots.Count)"
+        # 首口锅五类型齐全（与 engine/potgen.js 的 sanitize 同源硬约束）
+        $types = @('事实型', '情感型', '转移型', '反向型', '荒诞型')
+        $firstOk = $true
+        foreach ($t in $types) { if (-not $gp.pots[0].options.$t) { $firstOk = $false } }
+        Check $firstOk 'genpot 首口锅五类型齐全' '' '有类型缺失，客户端 sanitize 会丢弃它'
+    }
+}
+
+# 请求级凭据覆盖：带 x-bf-key/x-bf-model 时 keySource=request、model 被覆盖（证明 header 到达端点）。
+# 注：生产上用假 model 会被网关 404→genpot 非 200，故用 status 守卫，该断言主要在 mock 下验证管道。
+$rg = Get-Raw "$BaseUrl/api/genpot?n=1" 'GET' $null @{ 'x-bf-key' = 'smoke-key'; 'x-bf-model' = 'smoke-model' }
+if ($rg.Status -eq 200 -and $rg.Text) {
+    $gp2 = $null; try { $gp2 = $rg.Text | ConvertFrom-Json } catch { }
+    if ($gp2 -and $gp2.PSObject.Properties['keySource']) {
+        Check ($gp2.keySource -eq 'request') 'genpot 识别请求级 key（keySource=request）' "keySource=$($gp2.keySource)"
+        Check ($gp2.model -eq 'smoke-model') 'genpot 采用请求级 model 覆盖' "model=$($gp2.model)"
+    }
+}
+
+# ─────────────────────────────────────────────
+Write-Host ''
+Write-Host '7. /api/probe（模型可用性探针）' -ForegroundColor Yellow
+# ─────────────────────────────────────────────
+
+# probe 的核心契约：**上游失败也返回 200**（ok:false），只有 base+key 全缺才 503。
+# 「模型不可用」是要展示给用户的正常结论，不是服务错误。
+$rp = Get-Raw "$BaseUrl/api/probe" 'GET' $null @{ 'x-bf-model' = 'smoke-probe-model' }
+Check ($rp.Status -in 200, 503) 'probe 可达（200 或 503 未配置）' "status=$($rp.Status)" "status=$($rp.Status) err=$($rp.Error)"
+
+if ($rp.Status -eq 200 -and $rp.Text) {
+    $pb = $null; try { $pb = $rp.Text | ConvertFrom-Json } catch { }
+    Check ($null -ne $pb) 'probe 返回合法 JSON' '' 'JSON 解析失败'
+    if ($pb) {
+        Check ($pb.ok -is [bool]) 'probe 返回布尔 ok 字段' "ok=$($pb.ok)"
+        Check ($pb.keySource -in 'request', 'env', 'none') 'probe 报告 keySource' "keySource=$($pb.keySource)"
+        Check ($pb.model -eq 'smoke-probe-model') 'probe 采用请求级 model 覆盖' "model=$($pb.model)"
+    }
+}
+
+# 关键契约：用一个明显无效的 key，probe 仍必须回 200（把失败当结论），而不是 5xx。
+# 网关在鉴权阶段就拒绝坏 key（401），不消耗任何 token。
+$rb = Get-Raw "$BaseUrl/api/probe" 'GET' $null @{ 'x-bf-key' = 'bad-invalid-smoke-key' }
+Check ($rb.Status -eq 200) 'probe 对坏 key 仍返回 200（失败即结论，非服务错误）' "status=$($rb.Status)" "status=$($rb.Status) —— 契约要求 200+ok:false，不是 5xx"
+if ($rb.Status -eq 200 -and $rb.Text) {
+    $pb2 = $null; try { $pb2 = $rb.Text | ConvertFrom-Json } catch { }
+    if ($pb2) {
+        Check ($pb2.ok -eq $false) 'probe 对坏 key 报告 ok:false' "ok=$($pb2.ok)"
+        Check ($null -ne $pb2.error) 'probe 坏 key 时带 error 码供前端翻译' "error=$($pb2.error)"
+        Check ($pb2.keySource -eq 'request') 'probe 坏 key 时 keySource=request' "keySource=$($pb2.keySource)"
+        Check (-not ($rb.Text -match 'bad-invalid-smoke-key')) 'probe 响应不回显 key 明文' ''
+    }
+}
 
 # ─────────────────────────────────────────────────────────────
 Write-Host ''

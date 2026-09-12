@@ -93,7 +93,15 @@
     var ctrl = null;
     try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(FETCH_TIMEOUT) }; } catch (e) {}
 
-    return fetch(endpoint() + "?n=" + n, ctrl || undefined)
+    // 带上玩家凭据（若有），让生成锅的 token 也记在玩家自己账上。
+    var opt = ctrl || {};
+    var headers = {};
+    var jcfg = (typeof JudgeAPI !== "undefined" && JudgeAPI.cfg) || {};
+    if (jcfg.apiKey) headers["x-bf-key"] = jcfg.apiKey;
+    if (jcfg.model) headers["x-bf-model"] = jcfg.model;
+    opt.headers = headers;
+
+    return fetch(endpoint() + "?n=" + n, opt)
       .then(function (resp) {
         if (!resp.ok) { lastErr = "http_" + resp.status; return null; }
         return resp.json();

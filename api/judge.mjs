@@ -79,7 +79,7 @@ export default async function handler(req, res) {
 
   // 缺配置给 503 而不是 500：这是「服务未开通」，不是「服务出错」。
   // 返回体只说「没配」，不说「配了什么」。
-  if (!gatewayConfig().configured) {
+  if (!gatewayConfig(req).configured) {
     return send(res, 503, {
       error: {
         code: "gateway_not_configured",
@@ -116,6 +116,7 @@ export default async function handler(req, res) {
       npcDesc: clip(body.npcDesc, LIMIT_FIELD),
       reason: reason,
     }),
+    req,
   });
 
   if (!r.ok) {
@@ -140,7 +141,7 @@ export default async function handler(req, res) {
   return send(res, 200, {
     raw: r.content,
     latencyMs: r.latencyMs,
-    model: gatewayConfig().model,
+    model: gatewayConfig(req).model,
     usage: r.usage,
   }, cors);
 }

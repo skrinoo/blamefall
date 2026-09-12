@@ -39,15 +39,27 @@ function num(v, d) {
   return Number.isFinite(n) ? n : d;
 }
 
-/** 只报告「配没配」，绝不报告「配了什么」。这两个端点都是公网可达的。 */
-export function gatewayConfig() {
+/**
+ * 只报告「配没配」，绝不报告「配了什么」。这些端点都是公网可达的。
+ *
+ * @param {Object} [req]  传入请求时启用「请求级凭据覆盖」：玩家自带的
+ *   x-bf-key / x-bf-model 优先于服务端环境变量。访问者因此能用自己的网关
+ *   key 玩（token 记在自己账上），没带则回落作者 env key 兜底。
+ *   base 始终只认 env —— 允许玩家改 base 等于开放 SSRF，不做。
+ */
+export function gatewayConfig(req) {
   const base = (process.env.BLAMEFALL_API_BASE || "").replace(/\/+$/, "");
-  const key = process.env.BLAMEFALL_API_KEY || "";
+  const envKey = process.env.BLAMEFALL_API_KEY || "";
+  const h = (req && req.headers) || {};
+  const reqKey = String(h["x-bf-key"] || "").trim();
+  const reqModel = String(h["x-bf-model"] || "").trim();
+  const key = reqKey || envKey;
   return {
     configured: !!(base && key),
     baseConfigured: !!base,
     keyConfigured: !!key,
-    model: MODEL,
+    keySource: reqKey ? "request" : (envKey ? "env" : "none"),
+    model: reqModel || MODEL,
     temperature: TEMPERATURE,
     maxTokens: MAX_TOKENS,
     upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
@@ -140,8 +152,8 @@ export function buildUserPrompt({ potText, npcName, npcDesc, reason }) {
  *   errorCode ∈ null | 'not_configured' | 'timeout' | 'unreachable'
  *                    | 'http_<n>' | 'bad_json' | 'empty_content'
  */
-export async function callGateway({ systemPrompt, userPrompt, timeoutMs }) {
-  const cfg = gatewayConfig();
+export async function callGateway({ systemPrompt, userPrompt, timeoutMs, req }) {
+  const cfg = gatewayConfig(req);
   const limit = timeoutMs || UPSTREAM_TIMEOUT_MS;
 
   if (!cfg.configured) {
@@ -158,7 +170,9 @@ export async function callGateway({ systemPrompt, userPrompt, timeoutMs }) {
         Authorization: `Bearer ${cfg._key}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        // 必须用 cfg.model 而不是模块级 MODEL：前者含玩家请求级 x-bf-model 覆盖，
+        // 后者只是 env 默认值。用错的话探针会报告「某模型可用」却实际调了默认模型。
+        model: cfg.model,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
         messages: [
@@ -231,7 +245,7 @@ export function corsHeaders(req) {
   return {
     "Access-Control-Allow-Origin": h.origin || "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, x-bf-key, x-bf-model",
     "Access-Control-Max-Age": "86400",
   };
 }

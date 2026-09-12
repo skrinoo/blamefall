@@ -158,7 +158,15 @@ function Send-Text($stream, [int]$status, [string]$statusText, [string]$text, [s
 }
 
 # ── /api/judge ──────────────────────────────────────────────
-function Invoke-Judge($stream, [string]$reqBody) {
+function Invoke-Judge($stream, [string]$reqBody, $headers) {
+    # 请求级凭据覆盖（对齐生产 api/_gateway.mjs 的 gatewayConfig(req)）：
+    # 带了 x-bf-key / x-bf-model 就用玩家的，否则回落服务端 env；base 始终只认 env（防 SSRF）。
+    $reqKey    = if ($headers) { ([string]$headers['x-bf-key']).Trim() }   else { '' }
+    $reqModel  = if ($headers) { ([string]$headers['x-bf-model']).Trim() } else { '' }
+    $effKey    = if ($reqKey)   { $reqKey }   else { $gwKey }
+    $effModel  = if ($reqModel) { $reqModel } else { $gwModel }
+    $keySource = if ($reqKey)   { 'request' } elseif ($gwKey) { 'env' } else { 'none' }
+
     $payload = $null
     try { $payload = $reqBody | ConvertFrom-Json } catch { }
     if (-not $payload) {
@@ -187,7 +195,7 @@ function Invoke-Judge($stream, [string]$reqBody) {
         $userPrompt = "判定这一次甩锅。`n`n锅（背锅事件）：$([string]$payload.potText)`n甩锅对象：$target`n玩家给出的理由：$reason"
 
         $upBody = [ordered]@{
-            model       = $gwModel
+            model       = $effModel
             temperature = 0.85
             max_tokens  = 0
             messages    = @(
@@ -199,7 +207,7 @@ function Invoke-Judge($stream, [string]$reqBody) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         try {
             $r = Invoke-WebRequest -Uri "$gwBase/chat/completions" -Method Post `
-                     -Headers @{ Authorization = "Bearer $gwKey" } `
+                     -Headers @{ Authorization = "Bearer $effKey" } `
                      -ContentType 'application/json; charset=utf-8' `
                      -Body ([Text.Encoding]::UTF8.GetBytes($upBody)) `
                      -UseBasicParsing -TimeoutSec 30
@@ -213,7 +221,7 @@ function Invoke-Judge($stream, [string]$reqBody) {
             }
             Write-Log ("  [judge:proxy] {0}ms · {1} chars" -f $sw.ElapsedMilliseconds, $content.Length)
             # 与 api/judge.mjs 同构：raw 是客户端唯一会读的字段
-            Send-Json $stream 200 'OK' @{ raw = [string]$content; latencyMs = $sw.ElapsedMilliseconds; model = $gwModel; usage = $obj.usage }
+            Send-Json $stream 200 'OK' @{ raw = [string]$content; latencyMs = $sw.ElapsedMilliseconds; model = $effModel; keySource = $keySource; usage = $obj.usage }
         } catch {
             $sw.Stop()
             Write-Log ("  [judge:proxy] 失败 {0}ms · {1}" -f $sw.ElapsedMilliseconds, $_.Exception.Message)
@@ -242,8 +250,9 @@ function Invoke-Judge($stream, [string]$reqBody) {
         reaction_fail    = '这个理由我可不能认。'
     }
     $raw = $mock | ConvertTo-Json -Depth 6 -Compress
-    Write-Log ("  [judge:mock] seq={0} S={1} latency={2}ms" -f $script:MockSeq, $s, $MockLatencyMs)
-    Send-Json $stream 200 'OK' @{ raw = $raw; latencyMs = $MockLatencyMs; model = 'mock'; usage = $null }
+    $mockModel = if ($reqModel) { $reqModel } else { 'mock' }
+    Write-Log ("  [judge:mock] seq={0} S={1} key={2} model={3} latency={4}ms" -f $script:MockSeq, $s, $keySource, $mockModel, $MockLatencyMs)
+    Send-Json $stream 200 'OK' @{ raw = $raw; latencyMs = $MockLatencyMs; model = $mockModel; keySource = $keySource; usage = $null }
 }
 
 # ── 静态文件 ────────────────────────────────────────────────
@@ -399,7 +408,7 @@ try {
                 if ($method -ne 'POST') {
                     Send-Json $stream 405 'Method Not Allowed' @{ error = @{ code = 'method_not_allowed' } }
                 } else {
-                    Invoke-Judge $stream $body
+                    Invoke-Judge $stream $body $headers
                 }
             }
             elseif ($apiPath -eq '/api/health') {
@@ -426,6 +435,10 @@ try {
             elseif ($apiPath -eq '/api/genpot') {
                 # 与 api/genpot.mjs 同构的 mock：让客户端 PotGen 缓冲链路在没网关时也能端到端测。
                 # 两口锅覆盖不同 targetRole，验证 sanitize 与 next() 都走得通。
+                $gReqKey   = ([string]$headers['x-bf-key']).Trim()
+                $gReqModel = ([string]$headers['x-bf-model']).Trim()
+                $gKeySrc   = if ($gReqKey) { 'request' } elseif ($gwKey) { 'env' } else { 'none' }
+                $gModel    = if ($gReqModel) { $gReqModel } else { 'mock' }
                 Send-Json $stream 200 'OK' ([ordered]@{
                     pots = @(
                         [ordered]@{
@@ -442,8 +455,40 @@ try {
                             targetRole=[ordered]@{ '事实型'='npc'; '情感型'='self'; '转移型'='institution'; '反向型'='npc'; '荒诞型'='any' }
                         }
                     )
-                    requested = 2; returned = 2; latencyMs = 0; model = 'mock'
+                    requested = 2; returned = 2; latencyMs = 0; model = $gModel; keySource = $gKeySrc
                 })
+            }
+            elseif ($apiPath -eq '/api/probe') {
+                # 与 api/probe.mjs 同构的 mock：验证「选模型 + 检测可用性」这条链路。
+                # 关键契约：上游失败也回 200（「不可用」是要展示给用户的正常结论，不是服务错误）。
+                # 生产的 503（base+key 全缺）在这里不复现 —— dev-server 永远有一个 mock 上游，
+                # 这样才能在浏览器里同时测到「✓ 可用」和「✗ 不可用」两条 UI 分支。
+                $pReqKey   = ([string]$headers['x-bf-key']).Trim()
+                $pReqModel = ([string]$headers['x-bf-model']).Trim()
+                $pKeySrc   = if ($pReqKey) { 'request' } elseif ($proxy) { 'env' } else { 'none' }
+                $pModel    = if ($pReqModel) { $pReqModel } elseif ($proxy) { $gwModel } else { 'mock-model' }
+
+                $sw = [Diagnostics.Stopwatch]::StartNew()
+                if ($MockLatencyMs -gt 0) { Start-Sleep -Milliseconds ([Math]::Min($MockLatencyMs, 300)) }
+                $sw.Stop()
+                $lat = [Math]::Max(1, $sw.ElapsedMilliseconds)
+
+                # 失败模拟：填特定前缀的假 key，就能在浏览器里看到「✗ 不可用」提醒，
+                # 逐个验证前端 probeErrMsg 的错误码映射，无需真的烧网关：
+                #   bad402* → 余额不足 / bad404* → 模型不存在 / badtime* → 上游超时 / bad|invalid|expired* → Key 无效
+                $simErr = $null
+                if     ($pReqKey -match '^bad402')  { $simErr = 'http_402' }
+                elseif ($pReqKey -match '^bad404')  { $simErr = 'http_404' }
+                elseif ($pReqKey -match '^badtime') { $simErr = 'timeout' }
+                elseif ($pReqKey -match '^(bad|invalid|expired)') { $simErr = 'http_401' }
+
+                if ($simErr) {
+                    Send-Json $stream 200 'OK' ([ordered]@{ ok = $false; model = $pModel; keySource = $pKeySrc; latencyMs = $lat; error = $simErr })
+                    Write-Log ("  [probe:mock] FAIL sim={0} · key={1} model={2}" -f $simErr, $pKeySrc, $pModel)
+                } else {
+                    Send-Json $stream 200 'OK' ([ordered]@{ ok = $true; model = $pModel; keySource = $pKeySrc; latencyMs = $lat; reply = 'OK' })
+                    Write-Log ("  [probe:mock] OK · key={0} model={1} {2}ms" -f $pKeySrc, $pModel, $lat)
+                }
             }
             else {
                 Send-File $stream $path

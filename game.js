@@ -1202,11 +1202,115 @@
     });
   }
 
+  // ═══════════════ AI 凭据设置（标题屏）═══════════════════
+  /**
+   * 标题屏 AI 设置区：key / 模型输入 + 检测 + 保存/清除。
+   * 首次打开（localStorage 没存过 key）加 first-run 高亮提醒填一次；
+   * 填过保存后就不再打扰。留空也能玩（离线兜底 / 作者 env key 兜底）。
+   */
+  function initAiSet() {
+    var keyEl = $("ai-key"), modelEl = $("ai-model");
+    if (!keyEl) return;
+    keyEl.value = JudgeAPI.cfg.apiKey || "";
+    modelEl.value = JudgeAPI.cfg.model || "";
+    refreshAiStatus();
+
+    var stored = false;
+    try { stored = !!localStorage.getItem("bf.apiKey"); } catch (e) { /* ignore */ }
+    $("ai-set").classList.toggle("first-run", !stored);
+    if (!stored) {
+      setAiHint("首次打开：可填自己的网关 Key（token 记你账上）；留空也能玩（离线/作者兜底）。", "");
+    }
+
+    $("ai-save").addEventListener("click", function () {
+      JudgeAPI.setCredentials(keyEl.value, modelEl.value);
+      $("ai-set").classList.remove("first-run");
+      refreshAiStatus();
+      setAiHint("已保存到本机浏览器，下次打开不再询问。", "ok");
+    });
+    $("ai-clear").addEventListener("click", function () {
+      JudgeAPI.setCredentials("", "");
+      keyEl.value = ""; modelEl.value = "";
+      refreshAiStatus();
+      setAiHint("已清除，回落服务端默认。", "");
+    });
+    $("ai-probe").addEventListener("click", probeAI);
+  }
+
+  function refreshAiStatus() {
+    var st = $("ai-status");
+    if (!st) return;
+    var hasKey = !!JudgeAPI.cfg.apiKey;
+    st.textContent = JudgeAPI.isOnline()
+      ? ((hasKey ? "用自己的 Key" : "作者兜底 Key") + " · " + (JudgeAPI.cfg.model || "默认模型"))
+      : "离线兜底";
+    st.className = "ai-status" + (JudgeAPI.isOnline() ? " ok" : "");
+  }
+
+  function setAiHint(msg, cls) {
+    var h = $("ai-hint");
+    if (!h) return;
+    h.textContent = msg;
+    h.className = "ai-hint" + (cls ? " " + cls : "");
+  }
+
+  /** 点「检测」：拿当前输入的 key/model 真调一次 /api/probe，把结论翻译成提醒。 */
+  function probeAI() {
+    var keyEl = $("ai-key"), modelEl = $("ai-model");
+    var base = JudgeAPI.cfg.apiBase;
+    if (!base) { setAiHint("离线模式没有可检测的端点，部署到 Vercel 后才能检测。", "bad"); return; }
+    setAiHint("检测中…", "");
+    $("ai-probe").disabled = true;
+
+    var headers = {};
+    var k = (keyEl.value || "").trim(), m = (modelEl.value || "").trim();
+    if (k) headers["x-bf-key"] = k;
+    if (m) headers["x-bf-model"] = m;
+
+    fetch(base + "/api/probe", { method: "GET", headers: headers })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        $("ai-probe").disabled = false;
+        if (j && j.ok) {
+          setAiHint("✓ 模型可用：" + j.model + "（" + j.latencyMs + "ms · key 来源 " + j.keySource + "）", "ok");
+          refreshAiStatus();
+          return;
+        }
+        // error 有两种形态：200+ok:false 时是字符串码（"http_401"），
+        // 503 未配置时是 {code,hint} 对象。统一取码，否则会把对象拼成 [object Object]。
+        var code = (j && j.error) ? (typeof j.error === "object" ? j.error.code : j.error) : null;
+        if (!code || code === "gateway_not_configured" || code === "not_configured") {
+          setAiHint("✗ 不可用：服务端未配置网关。", "bad");
+        } else {
+          setAiHint("✗ 不可用：" + probeErrMsg(code) + "（模型 " + ((j && j.model) || "?") + "）", "bad");
+        }
+      })
+      .catch(function () {
+        $("ai-probe").disabled = false;
+        setAiHint("✗ 检测请求失败（网络/跨域）。", "bad");
+      });
+  }
+
+  /** 把上游错误码翻译成玩家能懂的提醒。 */
+  function probeErrMsg(code) {
+    switch (code) {
+      case "http_401": return "Key 无效或已过期（401）";
+      case "http_402": return "账户余额不足（402）";
+      case "http_403": return "Key 无权限（403）";
+      case "http_404": return "模型不存在（404），换个模型 ID";
+      case "timeout": return "上游超时，稍后再试";
+      case "unreachable": return "连不上网关，检查网络";
+      case "empty_content": return "模型只吐思维链不出正文（思考型），换非思考模型";
+      default: return code || "未知错误";
+    }
+  }
+
   // ═══════════════════════ 启动 ═══════════════════════
   function boot() {
     S = freshState();
     bind();
     loadFreeTimer(); syncFreeTimerUI();
+    initAiSet();
 
     var n = Object.keys(VERDICTS.entries).length;
     var hot = JudgeAPI.isOnline();

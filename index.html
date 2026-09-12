@@ -42,6 +42,33 @@
       <span class="set-hint">0 = 打字时不读秒（默认）</span>
     </div>
 
+    <!-- AI 凭据：首次打开提示填自己的 Key（token 记自己账），填过就不再打扰 -->
+    <div class="title-ai" id="ai-set">
+      <div class="ai-head">
+        <span class="ai-title">AI 裁判 / 生成锅</span>
+        <span class="ai-status" id="ai-status"></span>
+      </div>
+      <div class="ai-row">
+        <input id="ai-key" type="password" autocomplete="off"
+               placeholder="你的网关 API Key（可选·留空用作者兜底）">
+      </div>
+      <div class="ai-row">
+        <input id="ai-model" type="text" autocomplete="off" list="ai-models"
+               placeholder="模型 ID（可选·留空用默认）">
+        <datalist id="ai-models">
+          <option value="gemini-2.5-flash"></option>
+          <option value="gemini-2.5-pro"></option>
+          <option value="gpt-4o-mini"></option>
+        </datalist>
+        <button id="ai-probe" type="button" class="btn btn-ghost btn-sm">检测</button>
+      </div>
+      <div class="ai-hint" id="ai-hint"></div>
+      <div class="ai-actions">
+        <button id="ai-save" type="button" class="btn btn-primary btn-sm">保存</button>
+        <button id="ai-clear" type="button" class="btn btn-ghost btn-sm">清除</button>
+      </div>
+    </div>
+
     <p class="title-meta">
       <span id="meta-mode">离线模式 · 判定库 54 条</span>
       <span class="sep">|</span>

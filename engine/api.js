@@ -42,6 +42,12 @@
   var CFG = {
     apiBase: "",        // 留空 = 离线模式（file:// 双击即玩）；部署态由 autoSameOrigin() 填上
 
+    // 玩家自带的网关凭据（标题屏输入、localStorage 持久化）。
+    // 带上后请求头附 x-bf-key / x-bf-model，token 记在玩家自己账上；
+    // 留空则回落服务端 env key（作者兜底）。model 留空 = 服务端默认模型。
+    apiKey: "",
+    model: "",
+
     // 1850 / 2000，不是更早的 1350 / 1500，更不是最初的 800。
     //
     // 2026-09-11 生产实测（gemini-2.5-flash 经 openai-next 网关，
@@ -64,6 +70,8 @@
   function applyConfig(over) {
     if (!over) return;
     if (typeof over.apiBase === "string") CFG.apiBase = over.apiBase.replace(/\/+$/, "");
+    if (typeof over.apiKey === "string") CFG.apiKey = over.apiKey.trim();
+    if (typeof over.model === "string") CFG.model = over.model.trim();
     if (typeof over.timeout === "number") CFG.timeout = over.timeout;
     if (typeof over.flightMs === "number") CFG.flightMs = over.flightMs;
   }
@@ -142,9 +150,13 @@
         reason: p.reason
       };
 
+      var headers = { "Content-Type": "application/json" };
+      if (CFG.apiKey) headers["x-bf-key"] = CFG.apiKey;
+      if (CFG.model) headers["x-bf-model"] = CFG.model;
+
       var opt = {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: headers,
         body: JSON.stringify(body)
       };
       if (ctrl) opt.signal = ctrl.signal;
@@ -172,6 +184,31 @@
   }
 
   applyConfig(G.BLAMEFALL_CONFIG);
+
+  /** 从 localStorage 读玩家凭据（标题屏保存过就有）。隐私模式等读不到就忽略。 */
+  (function loadLocalCreds() {
+    try {
+      var ls = G.localStorage;
+      if (!ls) return;
+      var k = ls.getItem("bf.apiKey"); if (k) CFG.apiKey = k;
+      var m = ls.getItem("bf.model"); if (m) CFG.model = m;
+    } catch (e) { /* ignore */ }
+  })();
+
+  /**
+   * 标题屏保存凭据：写 CFG + localStorage。传空串 = 清除（回落服务端 env key）。
+   * 只存玩家自己浏览器，不上报任何地方。
+   */
+  function setCredentials(key, model) {
+    CFG.apiKey = String(key || "").trim();
+    CFG.model = String(model || "").trim();
+    try {
+      var ls = G.localStorage;
+      if (!ls) return;
+      if (CFG.apiKey) ls.setItem("bf.apiKey", CFG.apiKey); else ls.removeItem("bf.apiKey");
+      if (CFG.model) ls.setItem("bf.model", CFG.model); else ls.removeItem("bf.model");
+    } catch (e) { /* ignore */ }
+  }
 
   /**
    * 部署态自动同源。
@@ -203,6 +240,7 @@
     validate: validate,
     stripFence: stripFence,
     applyConfig: applyConfig,
+    setCredentials: setCredentials,
     isOnline: isOnline,
     VALID_TYPES: VALID_TYPES,
     get cfg() { return CFG; }

@@ -12,6 +12,9 @@
     "api/genpot.mjs": {
       "includeFiles": "prompts/**",
       "maxDuration": 30
+    },
+    "api/probe.mjs": {
+      "maxDuration": 30
     }
   }
 }

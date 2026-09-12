@@ -134,6 +134,7 @@ engine/judge.js     P 公式、完美论证暴击、五种结局
 engine/api.js       只管自由输入；返回值只有「通过全字段校验的对象」或 null
 engine/potgen.js    AI 锅预生成缓冲（热路径取用 / 冷路径兜底，与 genpot.mjs 同源校验）
 api/genpot.mjs      GET/POST /api/genpot：让网关生成 n 口锅，服务端逐口洗成引擎可用的 def
+api/probe.mjs       GET/POST /api/probe：拿玩家的 key+model 真调一句极简 prompt，回答「能不能用」
 ```
 
 `api.js` 的契约是：**「有返回」不等于「可用」**。
@@ -150,6 +151,19 @@ api/genpot.mjs      GET/POST /api/genpot：让网关生成 n 口锅，服务端�
 四次失败的完整记录（`moral_cost` 漂移 → `argument_type` 漂移 → `pot_ownership` 错判 0.8
 → `power_success` 把荒诞型评成全场最强的 90-92 分）见 **[`docs/DEVLOG.md`](docs/DEVLOG.md) 第 3 节**。
 
+### 自带 API Key 与选模型（可选）
+
+标题屏有一块「AI 裁判 / 生成锅」设置区，玩家可填自己的网关 Key 和模型 ID：
+
+- **Key 记在自己账上**：填了之后，`/api/judge`、`/api/genpot`、`/api/probe` 的请求会带上
+  `x-bf-key` / `x-bf-model` 头，服务端 `gatewayConfig(req)` 优先用请求级凭据，token 消耗记在玩家自己的网关账户；
+  留空则回落服务端 `BLAMEFALL_API_KEY`（作者兜底）。**`base` 始终只认环境变量**——允许请求改 `base` 等于开放 SSRF，不做。
+- **首次打开才提醒**：没存过 Key 时设置区高亮 + 一行提示；填过就存进 `localStorage`（`bf.apiKey` / `bf.model`），
+  之后打开自动回填、不再打扰。只存玩家自己浏览器，不上报任何地方。
+- **选模型 + 检测可用性**：「检测」按钮打一次 `/api/probe`，用当前 Key/模型真调一句极简 prompt。
+  probe 的关键契约是**上游失败也返回 200**（`ok:false` + 错误码），因为「模型不可用 / Key 无效 / 余额不足」
+  是要**展示给用户的正常结论**，不是服务错误。前端把错误码翻译成提醒（401 Key 无效、402 余额不足、404 模型不存在……）。
+
 ---
 
 ## 目录结构
@@ -163,8 +177,10 @@ blamefall/
 ├── .env.example            环境变量模板（不含真值，必须提交）
 ├── api/                    ← serverless 端点（只在部署态生效）
 │   ├── judge.mjs           POST /api/judge，刻意做薄
+│   ├── genpot.mjs          GET/POST /api/genpot，生成 n 口锅并逐口洗成引擎 def
+│   ├── probe.mjs           GET/POST /api/probe，模型可用性探针（失败也回 200）
 │   ├── health.mjs          GET /api/health?probe=3，健康检查 + 延迟实测
-│   └── _gateway.mjs        共享层：两个端点走同一条上游路径
+│   └── _gateway.mjs        共享层：所有端点走同一条上游路径 + 请求级 key/model 覆盖
 ├── data/
 │   ├── npcs.js             14 个 NPC（含数值表与人设）
 │   ├── pots.js             17 口锅
@@ -174,7 +190,8 @@ blamefall/
 ├── engine/
 │   ├── judge.js            判定引擎
 │   ├── fallback.js         本地兜底引擎（说服力实算）
-│   └── api.js              AI 裁判客户端（超时降级 + 自动同源）
+│   ├── api.js              AI 裁判客户端（超时降级 + 自动同源 + 请求级凭据头）
+│   └── potgen.js           AI 锅预生成缓冲（热路径取用 / 冷路径兜底）
 ├── prompts/
 │   ├── judge-v3.txt        实时裁判 system prompt（**唯一权威副本**，服务端读取）
 │   └── judge-v3.md         prompt 规格 + 版本史 + 引擎复算 + 平衡扇展数据
@@ -184,7 +201,7 @@ blamefall/
 │   ├── prompt-lib-batch.txt 批量生成用的 system prompt（权威副本）
 │   ├── generate-verdicts.ps1 批量生成器
 │   ├── dev-server.ps1      本地开发服务器（无 Node 环境下验证在线链路）
-│   ├── smoke-test.ps1      29 条断言，本地与生产通用
+│   ├── smoke-test.ps1      45 条断言（含 genpot/probe 与请求级凭据），本地与生产通用
 │   └── check-links.ps1     演示链接巡检，自动重写 README 的 LINK-STATUS 状态块
 └── docs/
     ├── DEPLOY.md           部署指南 + 故障对照表
@@ -261,6 +278,9 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 - 静态文件服务做了路径穿越防护，`..%2f` 编码穿越会被挡成 403（冒烟测试里有断言）。
 - `BLAMEFALL_ALLOW_ORIGIN` 可挡住扫公开端点的脚本，但它**不是安全边界**
   （Origin 头可伪造），真正的防线是网关侧配额。
+- **请求级凭据覆盖**：玩家自带的 `x-bf-key` / `x-bf-model` 只决定用哪个 key、哪个模型，
+  **`base` 恒等于环境变量**（不接受请求级 `base`，杜绝 SSRF）；玩家 Key 只存自己浏览器的
+  `localStorage`，服务端不回显、不记日志、不进任何响应体（`keySource` 只报「来源」不报「值」）。
 
 ---
 
@@ -273,7 +293,8 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 | 本地兜底引擎 | ✅ 完成 |
 | 平衡扇展 | ✅ 1190 组合，总胜率 51.8%，四条自检全通过 |
 | `/api/judge` 服务端 | ✅ 已部署（`blamefall-yy3a.vercel.app`，health 三绿；生产 probe median 1373ms） |
-| 在线链路验证 | ✅ 本地 29/29 断言全绿 + 浏览器端到端实测（见下） |
+| 在线链路验证 | ✅ 本地 45/45 断言全绿 + 浏览器端到端实测（见下） |
+| 自带 Key / 选模型 / 检测 | ✅ 标题屏可填自己的网关 Key + 模型 ID，`/api/probe` 检测可用性并提醒 |
 | 图像 / 音乐 / TTS 增强 | ⚠️ 未做（可用网关余额不足） |
 
 <!-- LINK-STATUS:START -->
@@ -301,7 +322,7 @@ trash    → 室友     · 事实型   S=85   expect P=0.82
 
 | 验证项 | 结果 |
 |---|---|
-| 冒烟测试 29 条断言 | ✅ 全绿（含路径穿越 403、密钥不回显、validate 全字段契约） |
+| 冒烟测试 45 条断言 | ✅ 全绿（含路径穿越 403、密钥不回显、validate 全字段契约、genpot/probe 与请求级凭据） |
 | 中文编码链路 | ✅ 手拼 JSON 发真实中文字节，`S=65` 与预期逐字对齐 |
 | 自动同源 | ✅ http 下 `apiBase` 自动填成同源，标题页显示「在线裁判」 |
 | AI 路径端到端 | ✅ 浏览器实测 423ms 返回，`validate()` 全字段通过，中文无乱码 |
