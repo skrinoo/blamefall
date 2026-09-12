@@ -21,7 +21,7 @@
     .\smoke-test.ps1                                  # 终端 B
 
 .EXAMPLE
-    .\smoke-test.ps1 -BaseUrl https://blamefall.vercel.app
+    .\smoke-test.ps1 -BaseUrl https://blamefall-yy3a.vercel.app
 
 .NOTES
     关于「第二套校验逻辑」：test 4.2 会复现 engine/api.js 的 validate() 契约。

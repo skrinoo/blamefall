@@ -331,10 +331,10 @@ $env:BLAMEFALL_API_KEY  = '<密钥>'
 3. Vercel 自动签 Let's Encrypt 证书；签发后客户端 `autoSameOrigin()` 直接用新域名，**代码零改动**
 4. 验证（在被封的机器上 = 大陆评委替身）：DNS 应解析到 Vercel 真 IP、SNI 握手应成功、`/api/health?probe=3&budget=1850` 应全绿
 
-### 备用链接：带哈希后缀的部署域名
+### 项目域名为什么是 `blamefall-yy3a.vercel.app`
 
-每次 Vercel 部署还会得到一个独立域名串（如 `blamefall-yy3a.vercel.app`）。
-封锁按域名匹配，波浪不一定同时覆盖所有串 —— 09-12 午间封锁波里
-项目域名打不开时它实测 200，probe min/median/max = 1289/1373/1537 全在 1850 预算内。
-**代价**：哈希域名钉死在某一次部署上，下次 push 后它服务的是旧版本；
-所以它只作「打不开时试试」的备用，提交前记得核对它对应的版本。
+Vercel 项目名实际是 `Blamefall-yy3a`（创建时 `blamefall` 与全局已有项目撞名，
+被自动加后缀），所以项目域名是 `blamefall-yy3a.vercel.app`，Domains 页显示 Valid。
+它**随项目走**：每次 push 触发重新部署后仍然指向最新生产版本，不会过期。
+09-11 实测过的 `blamefall.vercel.app` 已不在项目域名列表里（释放），
+**不要再写进任何材料** —— 释放后的域名可能被别人注册走。
