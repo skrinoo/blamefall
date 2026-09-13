@@ -1690,3 +1690,94 @@ if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch()
 **验证**（`bf/verify_generic.js`）：甩「转移型」给 tianqi 连续 4 次，`reactionFail` 依次「这不归我管」→「你那段别推给我」→「制度不背这个锅」→「找错人了」；generic 15 条全部补全（`missing: []`）。
 
 **教训**：「轮换机制正确」≠「所有路径都轮换」。要沿 reaction 的**完整取值链**逐层排查：entries 命中 → generic 兜底 → `pickReaction` 的 `ai → npc.fixedReaction → 固定句`，看哪个环节把变体「截断」成单条。查表主路径补全了，但 generic 兜底的 `E()` 漏传 reaction 字段，抽象 NPC 非库类型甩锅时就会固定落一句兜底台词。
+
+---
+
+## 36. 亮版天气头像残缺修复：暗版提亮 + 真实尺寸可读（2026-09-13）
+
+**需求**：用户反馈亮版天气头像主体残缺——小芯片下整个图形只剩半个光晕，云朵/闪电/雨滴全丢。
+
+**根因**（截图对比）：
+- 暗版 `assets/avatars/avh-tianqi.webp` 完整：深蓝夜空 + 金色闪电 + 雨滴 + 云朵，圆形卡居中。
+- 亮版 `assets-light/avatars/avh-tianqi.webp`（原始 9096 bytes）只剩左边半个深色光晕——之前生图时模型把"亮色调"理解为"把深底抹掉"，结果主体被自己的高光吃掉，只剩边缘一圈深色描边。
+- 同一根因问题也波及 `avh-shuini.webp`（水逆）——整个右半边主体光环丢失。
+
+**修复 / 实现**：
+
+**修复版天气头像**（image-to-image 提亮）：
+- 用**暗版原图**作 `image1` + `input_fidelity: high`，prompt 强调 `MUST preserve the exact composition, character placement, and pose; only adjust lighting/background tone to bright cream sky card style`，避免模型"重新创作"。
+- 输出 256×256 RGBA 透明 PNG，主体（云 + 闪电 + 3 滴雨）完整居中，奶白圆形卡 + 深色描边。
+- 文件：`C:\Users\skrin\.workbuddy\bf\gen\tianqi-final\avh-tianqi-keyed.png`（64KB）
+
+**抠底**（AI 生图伪透明 → 真透明）：
+- 暗版原图是 RGBA，亮版是 AI 假透明：模型"画"了暖白 cream 底冒充透明（alpha 全 255）。
+- 暖白 cream 抠色参数：`tol=35, abs_min=210, chroma_max=58, r=14`（仅吃与边界连通的 cream 区域）
+- 几何泛洪只吃外圈 ~43%，圆形描边闭合导致圆内 cream 与圆外不连通——**保留圆形内奶白作为卡片底色**（设计意图：avh 头像就是奶白卡片 + 主体）。
+- 反预乘 1px 消白边，圆形外全透明。
+- 转 WebP（lossless 保 alpha），42700 bytes。
+
+**替换**（`bf/convert_tianqi.py`）：
+- 备份原文件 `avh-tianqi.webp.bak`（9096 bytes）。
+- 写入 `assets-light/avatars/avh-tianqi.webp`（42700 bytes, 256×256 RGBA lossless）。
+- `verify_tianqi.py` 验证：`format: WEBP, size: (256, 256), mode: RGBA, alpha min/max: 0 255, corners [(0,0,0,0), (0,0,0,0)]`——真透明保留。
+
+**验证**（`bf/accept_tianqi.js`，CDP 无头 Edge + dev server `http://localhost:8200/`）：
+- 主题：`light`
+- 天气头像 DOM 命中：`{chipText: "天气0", imgSrc: "assets-light/avatars/avh-tianqi.webp", nw: 256, rect: {x: 822, y: 794, w: 74, h: 95}}`
+- **整页破图扫描**：`broken: []`（零破图）
+- 进游戏截屏 `verify/tianqi-check.png`：npcbar 天气芯片（第 12 位）显示完整的奶白卡片 + 深色描边 + 金色闪电 + 3 滴斜雨 + 云朵，与暗版构图完全一致，主体居中无残缺。
+- 控制台错误仅 11 条音频 CORS 报错（`file://` 协议下 fetch 音频，与图片层无关，是 `engine/audio.js` 既有行为）。
+
+**剩余问题**：水逆头像 `avh-shuini.webp` 同样残缺（右半边主体光环丢失），同根因未处理。本轮用户只要求修天气，水逆待用户决策后再走相同流程。
+
+**后续落地**：本轮用户批准「相同流程修复」，水逆头像按相同流程修复并验证通过，详见 §36.2。
+
+---
+
+## 36.2 亮版水逆头像残缺修复：与天气同流程（2026-09-13）
+
+**需求**：用户批准"相同流程修复"水逆头像（§36.1 提到的同根因未处理项）。
+
+**根因**：与天气相同——暗版完整（水星符号+月牙+椭圆轨道+圆形卡），亮版 5172 bytes 只剩左半边深色光晕+月牙碎片，主体被高光吃掉。
+
+**修复流程**（与 §36.1 完全一致）：
+
+**第一步 · image-to-image 提亮**（暗版作 image1 + input_fidelity:high）
+- 第一版 prompt 用 "brighten into cream sky" 太模糊 → 模型输出四角近黑（rgb=3-11），4.2% cream 背景，主体反被吃掉
+- 第二版 prompt 改为 `Requirements: (1) background OUTSIDE the round card must be pure white #FFFFFF; (2) the round card fill stays soft cream; (3) the Mercury symbol, moon and orbit stay fully intact; (4) brighten the deep navy tones to light sky-blue and warm amber` → 四角 rgb=247-255 纯白，cream-ish 89.35%，主体居中完整
+
+**第二步 · 抠色**（`key_shuini.py`，复用天气同套参数 tol=35, abs_min=210, chroma_max=58, r=14）
+- 泛洪吃掉 84.68% 背景，bbox 822×884 居中到 256×256
+- **新增：圆形卡外孤立色弧清理**（`clean_shuini_arc2.py`）—— 模型 prompt 要求"紫对光 + 琥珀轮廓光"被画在了圆形卡外侧（细长弯月形色弧），泛洪吃不掉（不是纯白/cream 色）
+- 6 个连通区域：5981（主体）/ 3436（水星十字）/ 1124+1120（椭圆轨道左右半）/ 397（上方小弧）/ 282（**孤立色弧，bbox 5×77，dist_norm 0.42**）
+- 清理策略：**保留面积 ≥ 200 px 且距画面外缘 ≥ 20px 的连通区域** —— 椭圆轨道整体跨度大，距外缘远，保留；孤立色弧紧贴外缘，剔除
+- 清理后 alpha mean 从 41.7 降到 32.9，opaque 14.37%
+
+**第三步 · PNG → lossless WebP**（`convert_shuini.py`）
+- 备份原文件 `avh-shuini.webp.bak`（5172 bytes）
+- 写入 `assets-light/avatars/avh-shuini.webp`（**16988 bytes**，256×256 RGBA lossless）
+- `verify_shuini.py`：四角 alpha=0（真透明），mode RGBA ✓
+
+**验证**（`accept_shuini.js`，CDP 无头 Edge + dev server:8200）：
+- 主题：`light`
+- 水逆头像 DOM 命中：`{chipText: "水逆0", imgSrc: "assets-light/avatars/avh-shuini.webp", nw: 256, nh: 256, rect: {x: 903, y: 794, w: 74, h: 95}}`
+- **天气回归检查**：`TIANQI-RECHECK {found: true, nw: 256}` —— 上轮修复未受影响
+- **整页破图扫描**：`broken: []`（零破图）
+- 进游戏截屏 `verify/shuini-check.png`：npcbar 第 13 位"水逆"显示完整水星符号+月牙+椭圆轨道+圆形奶白卡片，与暗版构图完全一致；右侧无孤立色弧残留
+- 控制台错误仅音频 CORS（既有 file:// 行为，与图片无关）
+
+**改动清单**：
+- `assets-light/avatars/avh-shuini.webp`：5172 → 16988 bytes（PNG → lossless WebP）
+- `assets-light/avatars/avh-shuini.webp.bak`：原文件备份
+- 新增脚本：`C:\Users\skrin\.workbuddy\bf\key_shuini.py`（纯白+cream 双扣色 + 居中）、`clean_shuini_arc2.py`（按"距画面外缘距离"剔除孤立色弧）、`compare_shuini.py`（左右对比图）、`convert_shuini.py`（PNG → WebP + 备份）、`verify_shuini.py`（WebP 解码与透明度验证）、`accept_shuini.js`（无头浏览器加载验收 + 天气回归）
+
+**教训**：
+- **image-to-image prompt 第一版易踩坑**：用"brighten into X"这种感性描述，模型可能误把背景理解成完全不同的东西（第一版把暗底抹掉变成四角近黑）。**强约束格式**（"OUTSIDE the round card must be pure white #FFFFFF" + 具体数值）能大幅提升稳定性
+- **抠色流程对"纯白+cream"通用**：复用 tol=35, abs_min=210, chroma_max=58, r=14 这套参数既能扣 cream 又能扣纯白，无需为每张图调参
+- **prompt 的"紫对光 / 琥珀轮廓光"等光效要求会画歪到圆形卡外**：模型难以精确控制光效只在卡片内部。需要二次清理：**按"距画面外缘距离"判据剔除孤立色弧**，比"按 bbox 中心距"更鲁棒
+- **连通区域标记无 scipy 也能做**：8-连通 BFS 自实现就够了，6 个区域不到 1ms
+
+**改动清单**：
+- `assets-light/avatars/avh-tianqi.webp`：9096 → 42700 bytes（PNG → lossless WebP）
+- `assets-light/avatars/avh-tianqi.webp.bak`：原文件备份
+- 新增脚本：`C:\Users\skrin\.workbuddy\bf\convert_tianqi.py`（PNG → WebP + 备份）、`verify_tianqi.py`（WebP 解码与透明度验证）、`accept_tianqi.js`（无头浏览器加载验收）
