@@ -1,0 +1,248 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   《锅从天降》 特效层  fx.css
+   ───────────────────────────────────────────────────────────────────────
+   纯 CSS 动画 + 少量 JS 生成的粒子。只动 transform / opacity / filter，
+   保证破笔记本上也不掉帧（与 style.css 的约定一致）。
+
+   两套调色板共用同一份规则：所有颜色走 --fx-* 变量，
+   由 <html data-theme="dark|light"> 切换。
+     暗版（事故现场）：琥珀 / 紫 / 冷红 / 伞蓝
+     亮版（轻松明快）：柠檬黄 / 桃粉 / 珊瑚 / 湖蓝
+
+   接入方式：
+     <link rel="stylesheet" href="fx.css">
+     <script src="fx.js"></script>
+   其余全自动 —— fx.js 会观察现有 class 变化（.npc.hit / .pot.flying /
+   #stage.climax …）自己触发，不需要改 game.js。
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --fx-a: 240, 165, 44;      /* 主色：琥珀 */
+  --fx-b: 139, 92, 246;      /* 副色：紫 */
+  --fx-c: 226, 86, 77;       /* 警示：冷红 */
+  --fx-d: 78, 168, 222;      /* 冷色：伞蓝 */
+  --fx-e: 255, 209, 102;     /* 暖白 */
+  --fx-ice: 207, 232, 245;   /* 冰 */
+  --fx-ink: 12, 15, 20;      /* 本主题底色 —— 用于判断该配亮的还是配暗的光 */
+  --fx-glow: 1;              /* 辉光强度系数 */
+  --fx-dur: 1;               /* 全局时长系数（慢动作时 JS 会调大） */
+}
+html[data-theme="light"] {
+  --fx-a: 255, 201, 60;
+  --fx-b: 255, 127, 176;
+  --fx-c: 255, 107, 87;
+  --fx-d: 108, 199, 238;
+  --fx-e: 255, 224, 102;
+  --fx-ice: 191, 233, 216;
+  --fx-ink: 234, 244, 255;
+  --fx-glow: 0.55;           /* 亮底不需要那么强的辉光，否则发糊 */
+}
+
+/* ── 粒子通用 ───────────────────────────────────────────────────────── */
+#fx .fxp {
+  position: absolute;
+  width: var(--sz, 16px); height: var(--sz, 16px);
+  margin-left: calc(var(--sz, 16px) / -2); margin-top: calc(var(--sz, 16px) / -2);
+  pointer-events: none; will-change: transform, opacity;
+  animation: fxFly calc(var(--d, 700ms) * var(--fx-dur)) cubic-bezier(.18,.72,.32,1) forwards;
+}
+@keyframes fxFly {
+  0%   { transform: translate(0, 0) scale(.25) rotate(0deg); opacity: 0; }
+  16%  { opacity: 1; }
+  100% { transform: translate(var(--tx, 0), var(--ty, 0)) scale(var(--sc, .3)) rotate(var(--r, 0deg)); opacity: 0; }
+}
+#fx .fxp.dot-y { filter: hue-rotate(0deg) saturate(1.15) brightness(1.08); }
+
+/* 光点：不依赖图片，纯渐变。用在中性粒子 / 冰针 / 灰烬上 */
+#fx .fxdot {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, rgba(var(--fx-e), 1), rgba(var(--fx-a), .85) 46%, rgba(var(--fx-a), 0) 72%);
+  pointer-events: none; will-change: transform, opacity;
+  animation: fxFly calc(var(--d, 700ms) * var(--fx-dur)) cubic-bezier(.18,.72,.32,1) forwards;
+}
+/* 软雾团：不需要描边的糊光，用纯径向渐变最省 */
+#fx .fxmist {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--fx-b), .55), rgba(var(--fx-b), .18) 52%, rgba(var(--fx-b), 0) 74%);
+  filter: blur(2px); pointer-events: none; will-change: transform, opacity;
+  animation: fxMist calc(var(--d, 900ms) * var(--fx-dur)) ease-out forwards;
+}
+@keyframes fxMist {
+  0%   { transform: translate(0, 0) scale(.18); opacity: 0; }
+  18%  { opacity: .95; }
+  100% { transform: translate(var(--tx, 0), var(--ty, 0)) scale(var(--sc, 1.6)); opacity: 0; }
+}
+/* 环形冲击波 */
+#fx .fxring {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  border: 2px solid rgba(var(--fx-a), .85);
+  box-shadow: 0 0 calc(14px * var(--fx-glow)) rgba(var(--fx-a), .6), inset 0 0 calc(12px * var(--fx-glow)) rgba(var(--fx-a), .35);
+  animation: fxRing calc(var(--d, 520ms) * var(--fx-dur)) cubic-bezier(.1,.75,.3,1) forwards;
+}
+@keyframes fxRing {
+  0%   { transform: scale(.15); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: scale(var(--sc, 3.2)); opacity: 0; }
+}
+/* 彩纸（亮版专用：搞笑感来自「什么都有」） */
+#fx .fxconf {
+  position: absolute; pointer-events: none;
+  background: rgb(var(--cc, 255, 201, 60));
+  border-radius: 2px;
+  animation: fxConf calc(var(--d, 900ms) * var(--fx-dur)) cubic-bezier(.2,.6,.3,1) forwards;
+}
+@keyframes fxConf {
+  0%   { transform: translate(0, 0) rotate(0deg) scale(.4); opacity: 0; }
+  14%  { opacity: 1; }
+  100% { transform: translate(var(--tx, 0), var(--ty, 0)) rotate(var(--r, 540deg)) scale(1); opacity: 0; }
+}
+
+/* ── 1. 甩锅拖尾 ────────────────────────────────────────────────────── */
+/* 由 JS 沿锅的移动路径撒点。这里只定义单个尾迹单元。 */
+#fx .fxtrail {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(var(--fx-a), .5), rgba(var(--fx-b), .2) 55%, transparent 76%);
+  animation: fxTrail calc(520ms * var(--fx-dur)) ease-out forwards;
+}
+@keyframes fxTrail {
+  0%   { transform: scale(.9); opacity: .8; }
+  100% { transform: scale(2.1) translateY(6px); opacity: 0; }
+}
+/* 拖尾上偶尔夹一枚会转的小星 */
+#fx .fxtrail.star { background: none; }
+#fx .fxtrail img { display: block; width: 100%; height: 100%; animation: fxTwinkle calc(520ms * var(--fx-dur)) ease-out forwards; }
+@keyframes fxTwinkle {
+  0%   { transform: rotate(0deg) scale(1); opacity: .95; }
+  100% { transform: rotate(120deg) scale(.2); opacity: 0; }
+}
+
+/* ── 2. 接锅光环（琥珀/彩光） ──────────────────────────────────────── */
+#fx .fxhalo {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--fx-e), .85), rgba(var(--fx-a), .45) 42%, rgba(var(--fx-a), 0) 70%);
+  pointer-events: none;
+  animation: fxHalo calc(760ms * var(--fx-dur)) ease-out forwards;
+}
+@keyframes fxHalo {
+  0%   { transform: scale(.25); opacity: 0; }
+  22%  { opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* ── 3. 冷战冰化 ────────────────────────────────────────────────────── */
+/* 冰壳：贴着目标元素的冰块叠层 */
+#fx .fxshell {
+  position: absolute; pointer-events: none; overflow: hidden;
+  border-radius: 12px;
+  background:
+    linear-gradient(150deg, rgba(var(--fx-ice), .38), rgba(var(--fx-ice), .06) 46%, rgba(var(--fx-d), .22)),
+    repeating-linear-gradient(58deg, rgba(255,255,255,.30) 0 2px, transparent 2px 22px);
+  box-shadow: inset 0 0 18px rgba(var(--fx-ice), .7), 0 0 calc(16px * var(--fx-glow)) rgba(var(--fx-d), .5);
+  animation: fxIce calc(1500ms * var(--fx-dur)) ease forwards;
+}
+@keyframes fxIce {
+  0%   { opacity: 0; transform: scale(1.12); }
+  18%  { opacity: 1; transform: scale(1); }
+  72%  { opacity: .92; }
+  100% { opacity: 0; }
+}
+#fx .fxsnow {
+  position: absolute; pointer-events: none;
+  animation: fxSnowIn calc(1400ms * var(--fx-dur)) ease forwards;
+}
+@keyframes fxSnowIn {
+  0%   { transform: scale(.2) rotate(-40deg); opacity: 0; }
+  26%  { transform: scale(1.05) rotate(0deg); opacity: 1; }
+  70%  { opacity: .9; }
+  100% { transform: scale(1) rotate(24deg); opacity: 0; }
+}
+
+/* ── 4. 环阵汇聚光束（第三幕高潮） ─────────────────────────────────── */
+#fx .fxbeam {
+  position: absolute; inset: -12%; opacity: 0; transition: opacity .55s ease;
+  pointer-events: none;
+  background:
+    repeating-conic-gradient(from 0deg at 50% 56%,
+      rgba(var(--fx-a), 0) 0deg 5.6deg,
+      rgba(var(--fx-a), .20) 5.6deg 7deg,
+      rgba(var(--fx-a), 0) 7deg 13deg),
+    radial-gradient(circle at 50% 56%, rgba(var(--fx-b), .30), rgba(var(--fx-b), 0) 62%);
+  -webkit-mask-image: radial-gradient(circle at 50% 56%, transparent 20%, #000 44%, #000 76%, transparent 96%);
+  mask-image: radial-gradient(circle at 50% 56%, transparent 20%, #000 44%, #000 76%, transparent 96%);
+  animation: fxSpin 16s linear infinite;
+}
+#fx .fxbeam.on { opacity: 1; }
+#fx .fxbeam::after {                 /* 内圈一道反向的细光，避免整块死板 */
+  content: ""; position: absolute; inset: 0;
+  background: repeating-conic-gradient(from 12deg at 50% 56%,
+      rgba(var(--fx-e), 0) 0deg 11deg, rgba(var(--fx-e), .16) 11deg 12.2deg, rgba(var(--fx-e), 0) 12.2deg 24deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 56%, transparent 34%, #000 52%, transparent 74%);
+  mask-image: radial-gradient(circle at 50% 56%, transparent 34%, #000 52%, transparent 74%);
+  animation: fxSpin 9s linear infinite reverse;
+}
+@keyframes fxSpin { to { transform: rotate(360deg); } }
+
+/* ── 5. 终幕：紫光呼吸 + 灰烬上浮 ──────────────────────────────────── */
+#fx .fxpulse {
+  position: absolute; left: 50%; bottom: 4%;
+  width: 130%; aspect-ratio: 1 / 1; transform: translateX(-50%);
+  pointer-events: none; opacity: 0; transition: opacity .8s ease;
+  background: radial-gradient(circle at 50% 50%,
+      rgba(var(--fx-b), .34), rgba(var(--fx-b), .14) 38%, rgba(var(--fx-b), 0) 66%);
+  animation: fxBreath 3.6s ease-in-out infinite;
+}
+#fx .fxpulse.on { opacity: 1; }
+@keyframes fxBreath {
+  0%, 100% { transform: translateX(-50%) scale(1); opacity: .78; }
+  50%      { transform: translateX(-50%) scale(1.13); opacity: 1; }
+}
+#fx .fxember {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 42% 38%, rgba(var(--fx-e), 1), rgba(var(--fx-a), .7) 50%, rgba(var(--fx-a), 0) 74%);
+  animation: fxEmber calc(var(--d, 2600ms) * var(--fx-dur)) linear forwards;
+}
+@keyframes fxEmber {
+  0%   { transform: translate(0, 0) scale(.5); opacity: 0; }
+  14%  { opacity: .95; }
+  70%  { opacity: .7; }
+  100% { transform: translate(var(--tx, 0), var(--ty, -220px)) scale(.15); opacity: 0; }
+}
+
+/* ── 6. 崩坏：落地黑尘 + 屏幕边缘压暗 ─────────────────────────────── */
+#fx .fxvign {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 88% 78% at 50% 46%, transparent 46%, rgba(var(--fx-c), .22) 100%);
+  animation: fxVign calc(620ms * var(--fx-dur)) ease-out forwards;
+}
+@keyframes fxVign {
+  0%   { opacity: 0; }
+  22%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+#fx .fxdust {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(var(--fx-c), .55), rgba(var(--fx-c), 0) 70%);
+  animation: fxDust calc(760ms * var(--fx-dur)) ease-out forwards;
+}
+@keyframes fxDust {
+  0%   { transform: translate(0, 0) scale(.3); opacity: .9; }
+  100% { transform: translate(var(--tx, 0), var(--ty, 0)) scale(1.5); opacity: 0; }
+}
+
+/* ── 7. 时间变慢：上升的尘埃 ────────────────────────────────────────── */
+#fx .fxmote {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: rgba(var(--fx-e), .5);
+  animation: fxMote calc(var(--d, 3200ms) * var(--fx-dur)) linear forwards;
+}
+@keyframes fxMote {
+  0%   { transform: translate(0, 0) scale(.6); opacity: 0; }
+  20%  { opacity: .5; }
+  100% { transform: translate(var(--tx, 0), var(--ty, -120px)) scale(.9); opacity: 0; }
+}
+
+/* ── 无障碍 / 省电 ─────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  #fx * { animation-duration: .001ms !important; opacity: 0 !important; }
+}
+#fx.fx-off > * { display: none !important; }

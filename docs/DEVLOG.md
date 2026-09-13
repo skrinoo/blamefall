@@ -1124,3 +1124,250 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 **验证**（浏览器、隐藏页）：几何 `imgLoaded(naturalWidth 1024)/240×240/hoverY 147/gapEl 18/cx 240=stageCX/panGlow in anim`；背锅链路 抓锅→点主角（catchSelf→act4→endingCarry；注意 ending 的 chip 已 pointer-events:none，合成 click 会绕过并误触空白放手分支，真机路径是点主角）→气泡「甩 锅 失 败/自己背」→potCls `pot ending-pot caught`（外壳不闪回）→over/bodySlid/report is-active/scrollTarget 369；问题③采样 3897ms 气泡 show=true 且新锅 held=true（尾窗可操作实证）、4891ms show=false；smoke 45/45；控制台零报错。
 
 **改动清单**：`game.js`（enterEnding 预载 / spawnEndingPot 换图+类序+出生点 / endingCarry 保留 ending-pot / finishThrow 两段收尾 / slideIntoReport 减速）；`style.css`（`.pot.ending-pot` 图像化重写 + panGlow）；新增 `assets/ending-pan.png`；`docs/concepts/` 生图迭代稿 ×4。纯客户端改动，服务端零变更。
+
+---
+
+## 24. 音频层落地：四幕 BGM + 音效（2026-09-13）
+
+**需求**（用户）：给《锅从天降》补 BGM 和游戏音效。BGM 要一首「完整连续」的曲子，四段情绪随四幕递进（轻松→稍紧张→推向高潮→激烈心跳加速→渐弱尾声），段间有过渡；音效用程序化合成；高潮音效最后决定废弃不用。
+
+**根因**（音乐情绪反复不对位的复盘）：
+- 一开始用 musicgen-small（300M）四段独立生成再 crossfade 焊成一首，但 small 对「紧张」「激烈但克制」等抽象情绪词控制力差、随机性大，反复改 prompt 命中率低。
+- 升级 musicgen-medium（1.5B）后情绪表达显著改善，但用 crossfade 焊接固定时长段落会压缩总长，切幕点（20/40/55s）对不齐，用户指出「第三段 41s 就过渡了」。
+- **最终方案定型**：不做焊接，改「切幕时切换」——四段独立音频（20/20/15/6s 精确对齐四幕时长），游戏在 `updateAct` 切幕瞬间用 Web Audio 的 GainNode 交叉淡化(crossfade)切换，时间点 100% 精确，且每幕内 loop。
+
+**修复/实现**：
+- 新增 `engine/audio.js`：自包含 IIFE，暴露 `window.BFAudio`。全部走 Web Audio API（AudioContext + GainNode 音量控制），BGM/SFX/总音量三级分离可编程调节（`setBgmVolume/setSfxVolume/setMasterVolume/setMuted`）。懒加载（首次 `init()` 才建 AudioContext，规避浏览器自动播放策略）；`playBgm(act)` 段间 1.2s crossfade 淡入淡出；`playSfx(name)` 即时触发；单个音频 fetch 失败静默降级，不影响游戏主循环。
+- `index.html`：`game.js` 前加 `<script src="engine/audio.js">`。
+- `game.js` 挂点：`startGame`（init + playBgm(1)）、`updateAct`（切幕 playBgm(a)）、`startFlight`（whoosh 甩锅）、`finishThrow` caught 分支（catch 被接住）、`slipPot`（slip 手滑）、`enterEnding`（ending 结尾锅）、`endingCarry`（blame 背锅）、`grabPot`（click 抓锅）。**enterClimax 的高潮音效按用户要求废弃，未挂载**。
+- 音频资产 `assets/audio/`：四幕 BGM ogg（act1_fun_m/act2_tight_m/act3_peak_m/act4_outro_m，共 613KB）+ 6 个 SFX wav（whoosh/catch/slip/ending/blame/click，共 155KB）。climax.wav 已删除。
+
+**验证**：待本地 dev-server（端口 8200）试玩验证——音频必须走 HTTP 服务（`fetch` 加载，`file://` 会被 CORS 拦）。需确认：四幕 BGM 切幕切换无报错、段间 crossfade 无硬切、各动作 SFX 触发正常、`BFAudio` 在无音频上下文环境静默降级。
+
+**改动清单**：新增 `engine/audio.js`、`assets/audio/*.ogg ×4 + *.wav ×6`；`index.html`（+1 行 script）；`game.js`（+9 处 BFAudio 调用，startGame/updateAct/startFlight/finishThrow/slipPot/enterEnding/endingCarry/grabPot）。纯客户端改动，服务端零变更。
+
+**备注（供后续接手的音频生产链路）**：BGM 用 Meta MusicGen 本地生成（venv `D:\musicgen-env`，medium 权重 `D:\ai-models\AI-ModelScope\musicgen-medium`，`python musicgen_local.py --model ... --dtype fp16`）；四段统一 A 小调 + chiptune 音色保证连贯；转 ogg 用本机 ffmpeg（WinGet 装，`-c:a libvorbis -q:a 5`）。SFX 用 `sfx_gen.py`（纯 numpy 合成）。这套链路不在游戏仓库内，属于开发侧工具。
+
+---
+
+## 25. 新视觉资产：背景 / 头像 / 图标 / 主角 / 结尾锅（生图 + 抠底 + 切片，2026-09-13）
+
+**需求**（用户）：为《锅从天降》制作新的背景、图标并加特效；生图走 MCP 生图模型、质量要好，且**背景与图标要保持一致性**。经问答收敛为：校园夜色取向、全量资产（背景 3 + 15 个 NPC 头像 + 主角立绘 + 图标组 + 结尾平底锅）、分尺寸分层方案（大尺寸层暗调半写实 / 小尺寸层扁平图形）、先做形态测试再批量。追加约定：**生成出的多个可用变体全部保留，由用户决定**。
+
+**关键约束 / 根因（两个硬问题）**：
+
+1. **`background:"transparent"` 未生效，5 张 sheet 全都没有 alpha 通道。** 实测（`System.Drawing` 读 `PixelFormat`）：
+   - `Two_full_body_poses_of_the_sam`（主角 1024×1536）→ `Format24bppRgb`
+   - `Seven_small_game_UI_symbols_ar`（图标 1536×1024）→ `Format24bppRgb`
+   - `Five_character_bust_portraits__…T00-07-20 / -05-55`（A/B 组头像）→ `Format24bppRgb`
+   - `Five_portrait_medallions_in_a__…T00-06-54`（C 组徽章）→ `Format24bppRgb`
+   模型改为**在画面里"画"出棋盘格 / 白底来假装透明**。因此旧的切片脚本 `Get-AlphaBox` 拿到的是垃圾（按 4 字节/像素读 24bpp 数据），产物是「白底整格 + 随机窄条」的废片 —— 本轮全部重做。
+2. **版式对不上。** 生成的半身像宽高比 ≈ 0.5（腰以上），而游戏里 `.npc` 芯片宽仅 74px、`.npc-glyph` 字号仅 23px。原样塞进去脸只有 ~12px，不可读。
+
+**修复 / 实现**：
+
+- **抠色管线**（不重新生图，省下 25–50 积分）：不依赖 alpha 通道，纯几何 + 亮度判定：
+  1. `bgl` = 亮度的**局部最大值**（PIL `MaxFilter(2r+1)`，r=14~18）；棋盘格两色在 r 大于格宽时会被抹平到亮格值，从而得到逐像素的背景基准；
+  2. `bg_cand = (chroma ≤ 30) ∧ (lum ≥ bgl − tol) ∧ (lum ≥ abs_min)`（无彩度 + 相对局部背景够亮 + 绝对下限）；
+  3. **从画布四边八连通泛洪**（迭代膨胀至收敛）——只吃掉与边界连通的背景，角色内部任何亮部都不会被误伤。这一步成立的前提是**所有图形都有近黑封闭描边**（已逐张目视确认）；
+  4. 边界 1px 带做**反预乘**还原：`α = clamp((bgl − lum)/bgl)`，`fg = (p − (1−α)·bgl)/α` —— 这是消白边光晕的关键；
+  5. 开运算（`MinFilter(5)`→`MaxFilter(5)`）后再取 bbox，过滤水印与杂点（A 组与 C 组 sheet 上都有淡印水印）。
+
+  各 sheet 实测（`bg_cand% / flooded% / iters`）：A_bust `65.17 / 65.14 / 514`、B_bust `69.63 / 69.57 / 511`、C_medal `75.23 / 75.22 / 511`、ICONS `93.00 / 92.94 / 585`、ACTOR `65.73 / 65.63 / 744`。参数：A `tol25/min234`、B `tol18/min246`（纯 255 平白底）、C `tol45/min200`（暖灰纸底，210–247 带颗粒）、ICONS/ACTOR `tol45/min205`（棋盘格 247/228 两色）。
+
+- **细胞切分与对齐**：整张 sheet 等分 5 列（1536/5=307.2），bbox 在**已抠好的 alpha** 上取，尺寸阈值过滤（列/行有效像素 ≥ max(3, 0.4%)）；统一贴到 256×256 透明方画布、按高度缩放到填 90%（图标 128×128 填 92%），保证 15 个头像的视觉大小一致。
+  sheet → id 映射（已目视核对）：A(…T00-07-20) = daoshi/jiaowu/fudaoyuan/xuezhang/didi；B(…T00-05-55) = roommate/moyu/shitang/suguan/ex；C(…T00-06-54) = tianqi/shuini/xingzuo/future_self/past_self。图标行序 = fact/emotion/shift/reverse/absurd/pot/umbrella。
+
+- **头像取景 4 变体（全部保留，供用户决定）**：`av-`（完整半身像，六边切底）、`avc-`（同上 + 圆形硬裁）、`avh-`（**头肩特写**：垂直裁到内容上 60%，底部 15% 做 alpha 淡出）、`avhc-`（头肩特写 + 圆形硬裁，fill 0.76 以免切肩）。
+  **放弃"自动颈线检测"**：两版尝试都失败 —— v2 用 `argmin(ext)` 在 30%~72% 窗口找颈线，B 组肩线被当成头宽导致厨师帽与汤勺被切；v3 改为「先找上半部最宽行再往下找最小值」仍不可靠（B 组最宽行落在肩部）。最终改为**确定性规则：保留内容上 60%**，且**只做垂直裁切、保留整幅宽度**（横向绝不出血）。实测裁切后宽高比 0.88~1.10（原 0.5），脸部放大约 1.7 倍。
+
+- **主角与结尾锅**：主角 sheet 2 列各取 bbox → 高 512px（`actor-idle` 167×512、`actor-catch` 150×512）。结尾平底锅按同族语言重绘（扁平 cel 上色 + 近黑描边 + 左上琥珀轮廓光 + 右下紫对光 + 木柄挂孔），纯 255 平白底（四角实测 `mean=255.0 min=255 max=255`），抠底后导出 `assets/pan/pan-v1-{1024,512,240}.png`。**旧像素风 `assets/ending-pan.png` 原封未动**。
+
+- **评审页**：`review-assets.html`（工作区根目录，3.06MB，全部图片 base64 内联、零外部依赖），按**游戏真实尺寸**渲染全部素材，含 4 变体标签切换、74px NPC 栏 mock、64px 高潮环阵 mock、尺寸阶梯、图标四档、平底锅新旧对比、以及 6 项待决清单。
+
+**验证**：
+
+- **光晕探测**：把切片贴到白(#FFF) / 中灰(#808080) / 深(--bg #0c0f14) 三种底色上放大比对，**三种底色上均无亮/暗光晕**，边缘干净。
+- **可读性阶梯**：74 / 64 / 40 / 22px 四档渲染 —— `avh-`/`avhc-` 在 40px 下五官仍可辨，`av-`/`avc-` 在同尺寸仅能识别剪影。图标 128/40/24px 清晰，16px 开始糊（故建议接入时把论证类型图标由 10px 提到 20px）。
+- **无头浏览器实测评审页**（自建 Node + CDP + 独立 profile 的 headless Edge）：`npc:15 / ring:8 / icons:7 / tabs:4 / imgs:67 / broken:0`，页高 3904px，**控制台零报错**；逐段截图 6 张 + 4 个标签页切换截图（切换后重绘正常，`.tab.on` 与建议文案同步更新）。
+- 未做：`index.html / style.css / game.js` 尚未接入，特效尚未开始。
+
+**改动清单**：新增 `assets/avatars/av-*.png ×15 + avc-*.png ×15 + avh-*.png ×15 + avhc-*.png ×15`（均 256×256 透明 PNG）；新增 `assets/icons/ic-*.png ×7`（128×128，**覆盖了此前的废片**）；新增 `assets/actor/actor-idle.png、actor-catch.png`（高 512）；新增 `assets/pan/pan-v1-{1024,512,240}.png`；新增 `assets/bg/bg-title.jpg、bg-stage.jpg、bg-report.jpg`（1536×950 / 1236×824 / 1148×888，合计 371KB，源 PNG 保留同目录）；新增 `docs/concepts/` 概念图与形态测试图。**`index.html / style.css / game.js / assets/ending-pan.png` 均未改动**，纯新增。
+
+**工具链备注（不在游戏仓库内，属开发侧）**：Python venv `C:\Users\skrin\.workbuddy\binaries\python\envs\bfimg`（Pillow 12.3.0 + numpy 2.5.3；注意默认 venv 的 pip 曾损坏，需重建）；脚本在 `C:\Users\skrin\.workbuddy\bf\`：`diag.py`（背景诊断）→ `key_and_slice.py`（抠色 + 切片）→ `headcrop4.py`（头肩特写）→ `key_pan.py`（锅）→ `sheets2.py`（验收对比图）→ `build_review.py` + `shot_review.js`（评审页与无头验收）。**PowerShell 5.1 无 BOM 时按系统 ANSI 读 `.ps1`，含中文注释会解析失败 → 脚本一律纯 ASCII**（§7 已记载）。
+
+## 26. 标题面图标设计：2 个 logo 概念 + 7 个 UI 功能图标（生图 + 提子物体 + 多变体，2026-09-13）
+
+**需求**（用户）：「你有做标题面的图标设计吗，没有的话，做一下」。
+
+核查结论：**确实没有。** 标题屏此前只有 `.title-pot` 里一个 `🍲` emoji 当 logo（`font-size:64px`，带 `potBob 3.2s` 上下浮动 + `drop-shadow`），齿轮按钮同样是 emoji `⚙`。即「标题面图标设计」此前为零，本轮从零补齐。延续 §25 的约定：**多个可用变体全部保留，由用户决定**。
+
+**关键约束 / 根因（三个硬问题）**：
+
+1. **标题 logo 的实际显示尺寸只有 64px**（`.title-pot` 的 `font-size`），不是 1024px。§25 已验证过一条判据：**深色底上纯深色的 mark 会糊掉** —— 带浅色底牌的徽章在 32px 仍清晰，无底板的纯 mark 在 64px 以下就认不出。所以「logo 用什么版式」不是审美问题，而是**小尺寸可读性问题**。
+2. **依旧是"假透明"问题。** logo A 是纯 255 平白底（四角 `mean=255.0`），logo B 是白底 + 六边形**内部**也有一块白底牌 —— 后者比 §25 的 sheet 多一层麻烦：背景白与六边形内的白**是连通的**，直接 `white` 取白会把两者合并成一张整图。
+3. **想复用已有图形时不能靠缩放。** 圆形徽章版需要一个锅形 mark，第一版直接把已有的 `assets/icons/ic-pot.png`（128px）贴进 1600px 画布 —— 产物上锅只是一个小点。根因是 **`PIL.Image.thumbnail()` 从不放大**（`resize()` 亦如此，只在明确给尺寸时放大）。改为**回去从 logo B 的原始分辨率里提取锅形**（见下）后正常。
+
+**修复 / 实现**：
+
+- **生图 3 张**（走内置 `ImageGen`，约 15–30 积分，不动用户网关额度）：logo A「下落锅 + 四道速度线 + 琥珀冲击波弧」1024×1024；logo B「六边形徽章 + 浅色底牌 + 锅形」1024×1024；UI 图标 sheet「7 个 UI 图标一行」1536×1024。三者共用同一套美术语言（扁平 cel 上色 + 近黑描边 + 左上暖琥珀轮廓光 + 右下紫对光），保证与 §25 的背景/头像同族。
+
+- **抠底**：复用 §25 的几何泛洪管线（局部亮度基准 + 无彩度 + 从四边泛洪 + 1px 反预乘消晕）。logo A/B 均为纯平白底，参数 `tol18 / abs_min246 / chroma_max18 / r14`。UI 图标 sheet 按 **1536/7 ≈ 219.4px 等宽列**切 7 格，行序映射为 `["gear","play","home","replay","pause","close","send"]`，统一贴到 96×96 方画布。
+
+- **logo 变体（6 个，全部保留）**：
+  | 标号 | 名称 | 做法 | 定位 |
+  |---|---|---|---|
+  | a | A 飞锅 · 无底板 | logo A 直接抠底 | 大尺寸装饰 / 启动动画 |
+  | mark-pan | D 独立锅形 | 从 B 的底牌里提纯锅形，深底专用 keyline | 需要纯 mark 的场合 |
+  | b-light / b-dark | B 六边徽章（浅底 / 深底） | 抠底；深底版把六边形内的白底牌重映射为深色渐变 | **主推** |
+  | c-light / c-dark | C 圆形徽章（浅底 / 深底） | 圆底板 + 复用锅形；深底版加 keyline | 圆形容器场合（App 图标） |
+
+- **提子物体：种子连通域**（这是本轮最有复用价值的一段）。目标是从 logo B 里单独拿出锅形：
+  1. `white = (chroma ≤ 16) ∧ (lum ≥ 232)`；`bg_white = 从四边泛洪(white)`（画布背景）；`plate = white ∧ ¬bg_white`（**被包住的底牌**，bbox `307,283 410×458`）。这一步必须排除与边界连通的部分，否则 `plate` 会退化成整张图。
+  2. `cand = ¬white ∧ (chroma ≤ 46)`；**从底牌质心 `(512,512)` 向外打射线找第一个 `cand` 像素作种子** → `flood_seed(cand, 种子)` 取含种子的连通域（50132px，bbox `378,337 268×334`）。
+     失败过的做法：直接取「底牌 bbox 内的非白像素」—— bbox 四角落在六边形的**深色外环**上，提出来的是「徽章 + 外环」而不是锅。
+  3. alpha 直接由连通域给出，再叠一层彩度过滤清掉同色碎片：`cmask = comp[bbox] ∧ (chroma ≤ 46)`；bbox 外硬置 0，边界 1px 走 `α = clamp((255−lum)/255)` 抗锯齿。
+     踩过的坑：六边形**琥珀内边线的一段与锅同属一个连通域**且落在 bbox 内，导致 D 版顶部残留两块琥珀碎片 → 靠彩度过滤切掉。
+
+- **深底专用 keyline**。`b-dark` 与 `c-dark` 都要在 `--bg:#0c0f14` 上可读。整体亮度重映射（`v → 0.56 + v·0.30`）**失败**：锅身中间调灰（v≈0.6）在深底上怎么压都糊。改为**只翻转最暗带**（近黑描边 → 浅色），其余压到中间调：
+  ```python
+  nv = np.where(v < 0.22, 0.90, 0.56 + np.clip((v - 0.22)/0.78, 0, 1) * 0.30)
+  ```
+  这样描边变成浅色 keyline，锅身在深底上仍有形。浅底版走反方向（`remap(0.05, 0.52)` 压暗）。
+
+- **应用图标底板**：`app_plate(size, logo)` = 圆角底板（`radius = 0.225·S`）+ 竖直渐变（`(30,38,53) → (12,15,20)`）+ 琥珀 hairlines 边框，logo 填 80%。6 个 logo 各导出 512/192/180/32 四档 + `favicon-*.ico`（16/32/48/64）。
+
+- **评审页第 06 节「标题面图标（本轮新做）」**：6 个 logo 标签页（大图 + **真实标题屏 mock**（64px、同底色同浮动动画帧）+ 128/96/64/48/32px 可读性阶梯）、7 个 UI 图标组、按钮实景（把 `ic-play/ic-pause/ic-close` 等贴进与 `.btn` 同规格的真实按钮）、6 个应用图标。
+
+**验证**：
+
+- **可读性阶梯实测**（本轮最重要的一条结论）：**A（无底板飞锅）在 64px 及以下基本认不出**；**B-浅底 / C-浅底在 32px 仍然清晰**；**B-深底 64px 以上很清楚**。→ 结论：标题 logo 应走**徽章 + 浅色底牌**路线，A 只建议当大尺寸装饰用。
+- **无头浏览器实测评审页**（自建 Node 22 + CDP + 独立 profile 的 headless Edge）：`logos:6 / logoLadder:5 / uiIcons:7 / btnDemos:7 / appIcons:6 / npc:15 / ring:8 / icons:7 / tabs:4 / imgs:120 / broken:0`，页高 5672px，**控制台零报错**。
+- **真实换图校验**：6 个 logo 标签逐个切换，读 `src` 长度 + `src.slice(2000,2030)` 的 `markMid` —— **6 个值互不相同**，证明是真换图而非同一张图重复内联（§5 已记载：`slice(30,60)` 只取到 PNG 头，不能用作判据）。
+- 未做：`index.html / style.css / game.js` 仍未接入（emoji → `<img>` 的替换属下一步），**特效尚未开始**。
+
+**改动清单**：新增 `assets/logo/`：6 个 logo × {1024,512,256,128} = 24 个 PNG（`logo-a-*`、`logo-mark-pan-*`、`logo-b-light-*`、`logo-b-dark-*`、`logo-c-light-*`、`logo-c-dark-*`）；新增 `assets/app/`：6 × {512,192,180,32} = 24 个 PNG + `favicon-*.ico ×6`；`assets/icons/` **新增**（与既有 7 个论证图标并存）`ic-{gear,play,home,replay,pause,close,send}.png ×7`（96×96）；重建 `review-assets.html`（3,430,613 字节，新增第 06 节 1722px 高）。**`index.html / style.css / game.js / assets/ending-pan.png` 均未改动**，纯新增。
+
+---
+
+## 27. 标题面待机 BGM + 首幕静音 bug 修复（2026-09-13）
+
+**需求**（用户）：「做个标题面待机 bgm」。
+
+**实现**：
+
+- **标题 BGM 生成**：复用 §24 的 MusicGen medium 生产链路（统一 A 小调 + chiptune DNA），prompt 偏向「gentle mellow title screen theme / soft airy synth pad / delicate sparkle arpeggio / light playful whistle / warm nostalgic schoolyard mood / looping」，与幕1「轻松」基调呼应但更舒缓、耐听、适合待机循环。30s 单声道 32000Hz，seed 555。产物 `assets/audio/title_menu_m.ogg`（300KB，峰值归一化到 0.85 留 headroom，转 ogg 参数与四幕一致 `libvorbis -q:a 5`）。
+- **`engine/audio.js` 扩展**：新增 `playTitle()` / `stopTitle()` 方法。标题 BGM 与游戏四幕 BGM 互斥——`playTitle` 停掉当前幕、`playBgm` 停掉标题，两者都走 1.2s crossfade。标题 BGM 也支持 `pendingTitle` 缓存（音频未就绪时补播），对外接口新增 `playTitle`，`_diag` 新增 `titleLoaded`/`playingTitle`。
+- **`game.js` 接入**：`boot()` 里注册一次性 `pointerdown`/`keydown` 监听——首次任意用户交互时 `init()` + `playTitle()`（规避浏览器自动播放策略，标题面是加载后第一个画面，AudioContext 必须等用户手势）；`btn-home` 和 `quitToTitle()` 回标题时 `playTitle()`。进入游戏时 `startGame` 的 `playBgm(1)` 会通过 `stopTitle` 自动停掉标题 BGM。
+
+**顺带修复首幕静音 bug（§24 遗留）**：`startGame` 里 `init()` 和 `playBgm(1)` 连续同步调用，但音频是**异步** fetch+解码，`playBgm(1)` 执行时 `bgmNodes[1].buffer` 还是 `undefined`，命中早退 `return`，导致**第一幕 BGM 永远不响**（后续切幕正常，因为那时音频早加载好）。修复：`playBgm` 在 ctx/buffer 未就绪时记录 `pendingAct`（而非静默放弃），`init` 的 `markLoaded` 在全部音频就绪后自动补播 `pendingAct`。标题 BGM 同理用 `pendingTitle`。
+
+**验证**（Node 22 自身 spawn headless Edge + CDP，绕开 PowerShell 进程生命周期坑与 agent-browser 连错 target 的问题——详见 §24 备注的验证工具链）：
+
+- 三个场景全过：① 首次交互（标题面）→ `playingTitle:true`、`curAct:0`；② 点击开始 → `playingTitle:false`、`curAct:1`（切到幕1）；③ 回标题 → `playingTitle:true`、`curAct:0`（切回标题 BGM）。
+- `titleLoaded:true`、11 个音频文件 fetch 全 200（含新增 title_menu_m.ogg）、`errs:[]` 零 JS 报错。
+- 无头环境 `ctxState:suspended` 是自动播放策略所致，真实用户手势会正常 resume（`init` 已有 `ctx.resume()` 兜底），非代码 bug。
+
+**改动清单**：新增 `assets/audio/title_menu_m.ogg`；`engine/audio.js`（+playTitle/stopTitle/pendingTitle，playBgm 修 pendingAct 补播）；`game.js`（boot 首次交互监听 + btn-home/quitToTitle 回标题 playTitle）。纯客户端改动，服务端零变更。
+
+---
+
+## 28. 光亮版「轻松明快搞笑」完整素材 + fx 特效层 + 双版本对比评审页（2026-09-13）
+
+**需求**（用户，原话）：「素材全部生成新版，这个版本的素材不要删，到时候再决定；如果当前的特效方案跟图片背景这些风格统一的话也要生成；然后生成光亮版本（轻松明快搞笑氛围）的素材版本（包括特效，标题面）」「剪影选头肩特写底部淡出，论证类图标提到20px，结尾平底锅选旧版，标题面选择六边徽章深底，UI功能组替换，特效方向按你的来（如果这个方向不适合光亮版本，但契合当前的，也生成，保留）」「等光亮版本生成完成，让我决定选择哪个版本」。
+
+合并：**① 全量补齐光亮版素材（暗版保留不删）② 实现特效层（暗版适用 + 亮版额外变种）③ 把 8 项已拍板的选择全部带到评审页**。
+
+**成本**：本轮生图 13 张走内置 ImageGen（背景 3 / 头像 3 sheet × 5 / 论证图标 1 sheet / 主角 1 sheet / 锅 1 / logo 概念 2 / UI 图标 1 / 粒子 1），约 65–130 积分，**不动用户网关额度**。
+
+**关键约束 / 根因（3 条新坑）**：
+
+1. **光亮版头像 sheet 的"假纯白"问题**。模型出图时给每张角色加了**柔和接触阴影**（tinted shadow，chroma 25–40），把 §25 的"无彩度 + 阈值 + 边缘泛洪"管线卡得死死的 —— 阴影形成一道暗环挡住泛洪，结果**每个角色背后残留一团白底云**。第一步管线抠出来全是带白色光晕的半成品。
+   **修复：改用描边泛洪**。把「背景候选」从「无彩度 + 高亮度」换成「**lum ≥ 118 即视为非描边**」，泛洪穿过亮色但被近黑描边卡住 —— 这是「魔棒点线稿外面」的经典用法。然后 `dilate(bg, 2)` 把背景切进描边 2px 以彻底吃掉光晕环，最后 `alpha = ~bg ∘ GaussianBlur(0.7)` 做 1px 软边。重跑后头像 100% 干净，深底上不再发光晕。这条经验已写进技能 `image-alpha-keying/SKILL.md` §3.5。
+2. **光亮版 logo B 的锅形提取失败**。原 §26 暗版用 `cand = ~white ∧ (chroma ≤ 46)` 提取锅形（暗版锅是铁灰，chroma ~24）。光亮版锅是**天蓝**（chroma ~70），被色度上限卡掉，提出来只剩 `1940 px` 的小碎片（一条小嘴）。修复：`cand = ~white`（去掉 chroma 过滤），底牌外切被白盘挡住，连通域只在锅内扩展 → 正确 `288199 px` 锅形。
+3. **`PIL.Image.thumbnail()` 从不放大**。这次 hero hero 把 128px 的 `ic-pot.png` 塞进 1600px 圆形徽章底板时又踩一次 —— 锅缩成一个点（已记入 §25 教训但这次犯了忘）。**正解是回去从原始大图按原分辨率重提**（光亮版的解决路径），不要把缩略图撑大。
+
+**修复 / 实现**：
+
+- **生图 + 抠底流水线**（同 §25 但参数换为「宽 + 描边泛洪」）：背景源 3 张右下角带「AI生成 / WORKBUDDY」水印 → 裁掉底部 72px → JPEG 92→80 自适应降到 ≤200KB；3 张头像 sheet 用 `lum ≥ 118` 描边泛洪 + `dilate 2px` + `GaussianBlur 0.7`；2 张 logo 概念用「底牌白 + 锅蓝」二元种子连通域；UI 图标 sheet 同论证图标走 7 等分；主角、锅、粒子同理。
+- **头像 4 变体**（默认 avh- 即你拍板的「头肩特写底部淡出」）：`av-`（完整）+ `avc-`（圆形硬裁）+ `avh-`（保留上 60% + 底 15% alpha 渐隐）+ `avhc-`（头肩 + 圆形硬裁，fill 0.76 避免切肩）。从头像 sheet **直接生成全部 4 变体**，方便日后切其他剪影。
+- **logo 6 变体**复用 §26：a / mark-pan / b-light / b-dark / c-light / c-dark。**你已拍板 b-dark**（六边徽章 · 深底）作为默认接入项。深底版用 `keyline()`（只翻转 v<0.22 的最暗带 → 0.90 浅色 keyline，其余压到 0.56~0.86）。
+- **粒子**：8 个 cel 形状（star / bubble / cloud / snow / diamond / moon / drop / burst），先生成单色版（白盘 + 近黑描边），再用 `recolor(img, main, shade)` 涂两套调色板：暗版（琥珀 / 紫 / 伞蓝 / 暖白）+ 亮版（柠檬黄 / 桃粉 / 珊瑚 / 湖蓝 / 薄荷）。纯白描边走 `v<0.25 → 38,30,48` 的近黑。这是 6 类特效全部可视化的基础。
+- **背景 3 张去水印**：右下角 110×40 px 的「AI生成 / WORKBUDDY」半透明字 —— 检测不可靠（白底场景干扰 lum/chroma 探测器），改用**视觉裁底 72px** 走通；暗版上一轮同样处理过。
+- **`fx.css` + `fx.js`（双主题特效层，零依赖）**：
+  - `--fx-a/b/c/d/e/ice` 等 RGB 三元组定义在 `:root`（暗版）与 `html[data-theme="light"]`（亮版）下 —— 同一份粒子规则同时给两套主题。
+  - 8 个粒子预设：`.fxp`（sprite 通用）、`.fxdot`（纯径向渐变光点）、`.fxmist`（紫雾）、`.fxring`（环形冲击波）、`.fxhalo`（接锅光环）、`.fxconf`（亮版专用彩纸）、`.fxtrail`（甩锅拖尾，`.fxtrail.star` 子样式让外层纯透明只显星星）、`.fxshell + .fxsnow`（冰壳 + 雪花）、`.fxbeam`（环阵汇聚光束，repeating-conic-gradient + radial mask 正反双层）、`.fxpulse`（终幕紫光呼吸）、`.fxember`（灰烬上浮）、`.fxvign + .fxdust`（崩坏边缘压暗 + 落地黑尘）、`.fxmote`（时间变慢的浮尘）。
+  - `fx.js` 暴露 `BFfx.{burst,mist,freeze,trail,beam,pulse,embers,motes,crash,confetti,halo,setEnabled,setTheme,useBase,setAuto,attach}`。**默认 attach 自动观察** `.npc.hit/reject/hold`、`.pot.crashed/caught`、`.flying/held`、`.stage.climax/ending/slowmo`、`#flash.umb` 这些**现有 class**——`game.js` 一行都不用改。`--fx-dur` 全局时长系数（慢动作时 JS 调大）。
+  - 兼容：`prefers-reduced-motion` 全静音；`#fx.fx-off` 整体关；`BFfx.setEnabled(false)` 立即关并清掉所有挂起的粒子。
+  - **可踩坑（已记入本次 commit）**：
+    1. `trailTick` 第一版的 `.fxtrail` 用 `<img class="fxtrail">` 当外层（无 src） + 把星星 `<img>` appendChild 进去，导致无 src 的 img 触发 7 次 `ERR_FILE_NOT_FOUND`（file:// 下 Chromium 把无 src img 也记为失败）。**修复：外层改成 `<div>`**。
+    2. 拖尾内层 `<img>` 的 src 拼接漏 `SPRITES[...]`，拼出 `assets/fx/star`（缺 `fx-` 前缀和 `.png`）—— 同样 7 次失败。**修复：补 `SPRITES[pick(...)]`**。
+- **`fx-demo.html`**：自包含演示台，主题切换（夜色 / 白昼）+ 8 个特效按钮 + 「全部连播」脚本。NPC chips 用 `avh-*` 头像 38px、actor 用 `actor-idle.png`、pot 角落图标用 `logo-mark-pan-128.png`、舞台背景用 `bg-stage.jpg`。**这就是给你看特效活着的样子**的入口。
+
+**8 项已拍板选择汇总**（用户的回复已全部记入）：
+
+| # | 决策 | 状态 | 资源 / 路径 |
+|---|---|---|---|
+| 1 | 剪影 = 头肩特写底部淡出（avh-） | ✓ | `assets/avatars/avh-*.png` + `assets-light/avatars/avh-*.png` |
+| 2 | 论证类图标 10px → 20px | ✓ | `.t-glyph` 字号改 |
+| 3 | 结尾平底锅 = 旧版像素风 | ✓ | `assets/ending-pan.png`（不替换） |
+| 4 | 标题面 = 六边徽章 · 深底（b-dark） | ✓ | `assets/logo/logo-b-dark-*.png` |
+| 5 | UI 功能组 = 替换 `⚙ ⏸ ✕` | ✓ | `ic-{gear,play,home,replay,pause,close,send}.png` |
+| 6 | 视觉版本 = 暗版 / 亮版 | **待你拍板** | 见 §H 评审页 |
+| 7 | 特效方向 = 按我的来 | ✓ 实现 + **待你拍板是否照搬** | `fx.css` + `fx.js` + `fx-demo.html` |
+| 8 | 是否保留光亮版 / 特效层 | **待你拍板** | `assets-light/`, `fx.css`, `fx.js` |
+
+**验证**：
+
+- **光亮版资产光晕探测**：3 底色（白 / 灰 / 深）下 15 头像 × 4 变体均无白边、无深边、无 alpha 截断。详见 `C:\Users\skrin\.workbuddy\bf\verify\av-all-light-on-{grey,white,dark}.png`。
+- **logo 6 变体可读性阶梯**（128 / 96 / 64 / 48 / 32 px on 真实标题背景）：`logo-b-dark-256.png` 在 32px 仍可读，`logo-a`（无底板）在 48px 以下糊掉 —— 跟你上一轮拍板 b-dark 的理由一致。
+- **`fx-demo.html` 无头验收**（`shot_fx.js`，自建 Node 22 + CDP + headless Edge）：暗版与亮版各 8 特效全部触发，`#fx` 子节点数符合预期（trail 13 / hit 32 / reject 51 / freeze shell=1+snow=7 / beam on / pulse on / crash vign=1 / slowmo），**`ERRORS none`**。修复过 7 次 `ERR_FILE_NOT_FOUND`（无 src `<img>` + 漏拼 `SPRITES[]`）后清零。
+- **对比评审页**（`review-v2.html`，工作区根 136 MB —— 281 张图全 base64 内联）：无头验收 `h2:8 / h3:14 / imgs:281 / broken:0 / twopane:4 / ladders:6 / h=11463 / ERRORS none`。**功能完整但体积偏大**，下一轮可缩为「按需加载」或拆分 sheet。
+- 未做：游戏本体（`index.html / style.css / game.js`）仍未接入——按你的指令「等光亮版本生成完成，让我决定选择哪个版本」，所以**等版本拍板再一次性接入**（包括 5 项已定 + 视觉版本 + 特效）以避免双倍工作量。
+
+**改动清单**（全部为新增，不修改暗版任何资源）：
+
+- 新增 `blamefall/assets-light/`：完整镜像暗版结构，3 背景 + 60 头像变体（15 × 4）+ 14 图标（7 论证 + 7 UI）+ 2 主角 + 3 锅 + 24 logo + 24 应用图标 + 6 favicon.ico + 8 粒子。
+- 新增 `blamefall/fx.css`、`blamefall/fx.js`、`blamefall/fx-demo.html`（3 文件共 ~25 KB）。
+- 新增 `D:\Program Date\WorkBuddy\2026-09-13-07-19-50\review-v2.html`（136 MB，按需加载后续优化）。
+- **未修改**：`index.html` / `style.css` / `game.js` / `assets/ending-pan.png` / 任何暗版资源。
+
+**工具链新增**：脚本在 `C:\Users\skrin\.workbuddy\bf\`：`diag2.py`（光亮版源图诊断）→ `fix_avatars_l`''ight.py''（描边泛洪修复 3 张头像 sheet）→ `pipeline_light.py`（光亮版全链路）→ `fix_logo_light.py`（锅形提取修复 + C 徽章重建）→ `verify_light.py`（光晕 + 阶梯 + 对比图）→ `build_review_v2.py` + `shot_review_v2.js`（对比评审页与无头验收）→ `shot_fx.js` + `probe_net.js`（特效验收 + 抓失败 URL）。
+
+---
+
+## 29. 音量控制层 + 静音按钮 + 标题 BGM 加载延迟修复（2026-09-13）
+
+**需求**（用户，四条）：
+1. 增加独立静音按钮，设置页面调节音效、BGM 音量大小；
+2. click 音效声音小，调大；待机和第一段稍微调低音量；
+3. 暂停时减小一点 BGM 声音；
+4. 修复 bug：重新加载后待机开始没有音乐（需要一段时间）。
+
+**根因**（bug #4）：`init()` 预加载了**全部 11 个音频**（标题 + 4 幕 BGM + 6 SFX），`markLoaded` 在 `pending===0`（全部加载完）才补播标题 BGM。首次加载 11 个文件要全部 fetch+decode 完标题 BGM 才响 → 「需要一段时间」。
+
+**修复 / 实现**：
+
+- **分轨音量架构**（`engine/audio.js`）：
+  - 用户可调三参数：`bgmVolume`(0.55) / `sfxVolume`(0.8) / `muted`(false)，持久化到 localStorage（`bf.bgmVolume`/`bf.sfxVolume`/`bf.muted`）。
+  - 内部相对增益（乘在用户音量之上）：`relTitle=0.72`（标题待机偏低）、`relAct1=0.80`（第一幕偏低）、`relActOther=1.0`、`relClick=1.6`（click 单独调大）。
+  - `playBgm` 淡入目标改为 `rel`（act1 用 relAct1，其余 relActOther）；`playTitle` 淡入目标 `relTitle`；`playSfx` 给 click 单独 `createGain` 设 `relClick`。
+  - 暂停压音：`setPaused(on)` 设置 `ducked`，`applyBgmGain()` 里 `bgmGain.gain = bgmVolume × (ducked ? 0.4 : 1)`（暂停压到 40%）。
+  - 新增对外接口：`setPaused` / `isMuted` / `bgmVolume`(getter) / `sfxVolume`(getter)。
+- **标题 BGM 优先加载**（bug #4 修复）：`init()` 里标题 BGM 单独 `loadBuffer`，一就绪就 `if (pendingTitle) playTitle()`，**不等其余 10 个文件**；其余音频并行后台加载，`markLoaded` 只负责补播 `pendingAct`。
+- **UI 接入**：
+  - `index.html`：标题面加 `.title-actions` 容器（`#btn-mute` 静音按钮 + `#btn-settings`，合并了原先独立的设置按钮）；设置弹窗加「声音」section（`#set-bgm-vol` / `#set-sfx-vol` 两个 range 滑块 + 百分比显示）。
+  - `game.js`：`loadAudioSettings`/`saveAudioSettings`/`applyAudioSettings`/`syncAudioUI`/`bindAudioControls` 五个函数；`boot()` 里 `loadAudioSettings()` → `applyAudioSettings()`（init 前设好变量，init 时直接读到）→ `bindAudioControls()`；滑块 `input` 事件实时更新 + 持久化；静音按钮 toggle 切换文字（🔊 声音开 ↔ 🔇 已静音）；`setPaused` 里调 `BFAudio.setPaused(S.paused)`。
+  - `style.css`：`.title-actions`（按钮组居中）+ `input[type="range"]`（accent-color 琥珀）。
+
+**验证**（CDP 无头 Edge，errs=[] 零报错）：
+
+- 14 个 API 方法全齐（新增 setPaused/isMuted/bgmVolume/sfxVolume）。
+- UI 三元素（btnMute + 两滑块）都在。
+- **标题 BGM 1.5s 内即播放**（titleLoaded:true + playingTitle:true，不等其余文件）—— bug #4 修复确认。
+- 滑块：bgm 0.55→0.30、sfx 0.8→0.6 实时生效。
+- 静音按钮：muted false→true，按钮文字变「🔇 已静音」。
+- 暂停：ducked false→true（压音生效）。
+
+**改动清单**：`engine/audio.js`（分轨音量 + relTitle/relAct1/relClick + 暂停压音 + 标题优先加载）；`game.js`（音量设置持久化 + 静音/滑块绑定 + setPaused 压音）；`index.html`（+静音按钮 + 声音 section）；`style.css`（+.title-actions + range 样式）。纯客户端改动，服务端零变更。
+

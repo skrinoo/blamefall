@@ -105,6 +105,9 @@ $MIME = @{
     '.ico'  = 'image/x-icon'
     '.woff' = 'font/woff'
     '.woff2'= 'font/woff2'
+    '.ogg'  = 'audio/ogg'
+    '.wav'  = 'audio/wav'
+    '.mp3'  = 'audio/mpeg'
 }
 
 # Mock 判定的计数器。带进 technique_name，

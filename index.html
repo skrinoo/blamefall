@@ -23,15 +23,19 @@
 
     <button id="btn-start" class="btn btn-primary btn-lg">开始接锅</button>
 
+    <div class="title-actions">
+      <button id="btn-mute" class="btn btn-ghost btn-sm title-mute" type="button" title="声音开/关">
+        <img id="mute-icon" src="assets/icons/ic-sound-on.png" alt="声音">
+      </button>
+      <button id="btn-settings" class="btn btn-ghost btn-sm" type="button">⚙ 设置</button>
+    </div>
+
     <ul class="title-howto">
       <li><b>点住</b>天上掉下来的锅 —— 时间会慢下来，但不会停</li>
       <li><b>选一个人</b>，再<b>选一句理由</b> —— 锅就飞过去了</li>
       <li>理由可以自己写。<b>写得越好，甩得越远</b></li>
       <li class="secret">还有一个动作没人告诉你：把锅<b>拖回自己身上</b></li>
     </ul>
-
-    <!-- 设置统一入口：所有设置都在弹窗里（见页底 #settings-modal） -->
-    <button id="btn-settings" class="btn btn-ghost btn-sm title-settings" type="button">⚙ 设置</button>
 
     <p class="title-meta">
       <span id="meta-mode">离线模式 · 判定库 54 条</span>
@@ -187,6 +191,20 @@
         </div>
       </section>
       <section class="settings-sec">
+        <h3 class="settings-sec-title">声音</h3>
+        <div class="title-set">
+          <label for="set-bgm-vol">背景音乐音量</label>
+          <input id="set-bgm-vol" type="range" min="0" max="100" step="5" value="55">
+          <span class="unit" id="set-bgm-vol-val">55%</span>
+        </div>
+        <div class="title-set">
+          <label for="set-sfx-vol">音效音量</label>
+          <input id="set-sfx-vol" type="range" min="0" max="100" step="5" value="80">
+          <span class="unit" id="set-sfx-vol-val">80%</span>
+        </div>
+        <p class="settings-hint">暂停时背景音乐会自动降低，恢复后还原。</p>
+      </section>
+      <section class="settings-sec">
         <h3 class="settings-sec-title">AI</h3>
         <!-- AI 凭据：首次打开提示填自己的 Key（token 记自己账），填过就不再打扰 -->
         <div class="title-ai" id="ai-set">
@@ -247,6 +265,7 @@
 <script src="engine/judge.js"></script>
 <script src="engine/api.js"></script>
 <script src="engine/potgen.js"></script>
+<script src="engine/audio.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

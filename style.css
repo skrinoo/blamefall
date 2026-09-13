@@ -138,6 +138,9 @@ kbd {
   padding: 6px 8px; outline: none; text-align: center;
 }
 .title-set input[type="number"]:focus { border-color: var(--crit); }
+.title-set input[type="range"] {
+  width: 160px; accent-color: var(--crit); cursor: pointer;
+}
 .title-set .unit { color: var(--ink-faint); }
 .title-set .set-presets { display: inline-flex; gap: 4px; }
 .title-set .set-presets button {
@@ -181,7 +184,14 @@ kbd {
 .ai-actions { display: flex; gap: 8px; }
 
 /* ═══════════════════════ 设置弹窗（统一入口）═══════════════════════════ */
-.title-settings { margin-top: 18px; }
+/* 标题屏动作按钮组（静音 + 设置） */
+.title-actions {
+  margin-top: 18px; display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.title-mute img {
+  width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,.6));
+}
 /* 红点：首次打开没存过 Key 时提醒一次；保存后消失 */
 #btn-settings { position: relative; }
 #btn-settings.attn::after {

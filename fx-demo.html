@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>锅从天降 · 特效演示台</title>
+<link rel="stylesheet" href="fx.css">
+<style>
+:root{
+  --bg:#0c0f14; --bg-2:#131822; --line:#232b38; --ink:#e8edf5; --ink-dim:#8b97a8; --ink-faint:#5a6675;
+  --good:#f0a52c; --bad:#e2564d; --shadow-c:#8b5cf6; --umbrella:#4ea8de; --crit:#ffd166; --hold:#7c8798;
+  --panel:rgba(19,24,34,.88);
+}
+html[data-theme="light"]{
+  --bg:#eaf4ff; --bg-2:#ffffff; --line:#c9dcf0; --ink:#2a2333; --ink-dim:#5d6b80; --ink-faint:#8794a8;
+  --good:#f0a52c; --bad:#ff6b57; --shadow-c:#e2559a; --umbrella:#2f9fd6; --crit:#e0a51c; --hold:#93a0b3;
+  --panel:rgba(255,255,255,.9);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
+  font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,sans-serif;
+  transition:background .3s,color .3s;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:18px 16px 44px}
+h1{font-size:20px;letter-spacing:.1em;margin-bottom:4px}
+.sub{color:var(--ink-dim);font-size:12px;line-height:1.7;margin-bottom:14px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+button{
+  font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;cursor:pointer;
+  background:var(--bg-2);color:var(--ink);border:1px solid var(--line);
+  transition:transform .12s,border-color .18s,box-shadow .18s;
+}
+button:hover{transform:translateY(-1px);border-color:var(--good)}
+button:active{transform:translateY(1px) scale(.985)}
+button.primary{background:linear-gradient(180deg,#f5b642,#e08c14);border-color:#b96f0c;color:#231603;font-weight:700}
+button.on{border-color:var(--good);box-shadow:0 0 0 1px var(--good)}
+.seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:8px 16px;background:transparent}
+.seg button.on{background:var(--good);color:#231603;font-weight:700}
+.hint{font-size:12px;color:var(--ink-dim);margin-left:auto}
+
+#stage{
+  position:relative;height:440px;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:var(--bg-2);
+}
+#stage .skybg{
+  position:absolute;inset:0;background-size:cover;background-position:center;
+  opacity:.85;transition:filter .4s;
+}
+html[data-theme="light"] #stage .skybg{opacity:1}
+#stage.slowmo .skybg{filter:saturate(.7) brightness(.85)}
+#stage.climax .skybg{filter:saturate(1.25) contrast(1.06)}
+#stage .veil{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.35),transparent 45%)}
+html[data-theme="light"] #stage .veil{background:linear-gradient(0deg,rgba(255,255,255,.28),transparent 45%)}
+#fx{position:absolute;inset:0;pointer-events:none;z-index:20}
+
+.actor{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);text-align:center;z-index:8}
+.actor img{height:104px;display:block;filter:drop-shadow(0 6px 12px rgba(0,0,0,.45))}
+.actor .nm{font-size:10px;color:var(--ink-faint);letter-spacing:.3em;margin-top:2px}
+
+.npcbar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;justify-content:center;padding:8px;z-index:9}
+.npc{
+  width:64px;padding:6px 3px 5px;text-align:center;background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  transition:transform .13s,border-color .18s;
+}
+.npc:hover{transform:translateY(-3px);border-color:var(--good)}
+.npc img{width:38px;height:38px;display:block;margin:0 auto}
+.npc .n{font-size:10px;color:var(--ink);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.npc.hit{border-color:var(--good)}
+.npc.reject{border-color:var(--bad)}
+.npc.hold{border-color:var(--hold)}
+
+.pot{
+  position:absolute;left:50%;top:40px;width:176px;padding:8px 11px 9px;z-index:6;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;cursor:grab;
+  transform:translateX(-50%);
+}
+.pot .pt{display:flex;align-items:center;gap:7px}
+.pot img{width:22px;height:22px}
+.pot .tx{font-size:12px;line-height:1.5;margin-top:4px;color:var(--ink)}
+.pot.held{border-color:var(--good);box-shadow:0 0 0 1px var(--good)}
+.pot.flying{z-index:28}
+.pot.crashed,.pot.caught{opacity:0;transition:opacity .3s}
+
+.foot{margin-top:14px;font-size:12px;color:var(--ink-faint);line-height:1.9}
+kbd{font-family:ui-monospace,Consolas,monospace;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>锅从天降 · 特效演示台</h1>
+  <p class="sub">6 类特效 × 2 套调色板。所有动画只走 transform / opacity，粒子由 <code>fx.js</code> 自动观察 class 触发 —— 游戏本体一行代码都不用改。</p>
+
+  <div class="bar">
+    <div class="seg" id="themeSeg">
+      <button data-th="dark" class="on">夜色（事故现场）</button>
+      <button data-th="light">白昼（轻松明快）</button>
+    </div>
+    <button id="btnEnable" class="on">特效：开</button>
+    <button id="btnAuto">全部连播</button>
+    <span class="hint">切换主题看两套配色 —— 同一份规则，只换 <kbd>--fx-*</kbd> 变量</span>
+  </div>
+
+  <div class="bar">
+    <button data-fx="trail">① 甩锅拖尾</button>
+    <button data-fx="hit">② 命中火花</button>
+    <button data-fx="reject">③ 弹反回旋</button>
+    <button data-fx="freeze">④ 冷战冰化</button>
+    <button data-fx="beam">⑤ 环阵汇聚光束</button>
+    <button data-fx="ending">⑥ 紫光呼吸 + 灰烬</button>
+    <button data-fx="crash">⑦ 崩坏落地</button>
+    <button data-fx="slowmo">⑧ 时间变慢</button>
+  </div>
+
+  <div id="stage">
+    <div class="skybg" id="skybg"></div>
+    <div class="veil"></div>
+    <div class="pot" id="pot">
+      <div class="pt"><img id="potIcon" alt=""><span class="tx" id="potText">小组群里那句「这个你来弄吧」</span></div>
+    </div>
+    <div class="actor"><img id="actorImg" alt=""><div class="nm">你</div></div>
+    <div class="npcbar" id="npcbar"></div>
+    <div id="fx"></div>
+  </div>
+
+  <p class="foot">
+    暗版配色：琥珀 <b>#f0a52c</b> / 紫 <b>#8b5cf6</b> / 冷红 <b>#e2564d</b> / 伞蓝 <b>#4ea8de</b><br>
+    亮版配色：柠檬黄 <b>#ffc93c</b> / 桃粉 <b>#ff7fb0</b> / 珊瑚 <b>#ff6b57</b> / 湖蓝 <b>#6cc7ee</b>，命中额外撒彩纸<br>
+    特效③弹反回旋：锅被「怼回来」—— 反作用力火花 → 回旋弧线虚线拖尾 → 弧线顶点甩飞的小星 → 末端回甩一击
+  </p>
+</div>
+
+<script src="fx.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var NAMES = ["学弟学妹","室友","摸鱼组员","社团学长","导师","教务处","辅导员"];
+  var IDS   = ["didi","roommate","moyu","xuezhang","daoshi","jiaowu","fudaoyuan"];
+  var stage = $("stage");
+
+  function assetBase(){
+    return document.documentElement.getAttribute("data-theme") === "light" ? "assets-light/" : "assets/";
+  }
+  function NPCS(){ return ["didi","roommate","moyu","xuezhang","daoshi","jiaowu","fudaoyuan"]; }
+
+  function build(){
+    var b = assetBase();
+    $("skybg").style.backgroundImage = "url('" + b + "bg/bg-stage.jpg')";
+    $("actorImg").src = b + "actor/actor-idle.png";
+    $("potIcon").src = b + "logo/logo-mark-pan-128.png";
+    var bar = $("npcbar"); bar.innerHTML = "";
+    IDS.forEach(function(id, i){
+      var d = document.createElement("div");
+      d.className = "npc"; d.dataset.id = id;
+      d.innerHTML = '<img src="' + b + 'avatars/avh-' + id + '.png" alt="">' +
+                    '<div class="n">' + NAMES[i] + '</div>';
+      bar.appendChild(d);
+    });
+  }
+  build();
+
+  // ── theme ───────────────────────────────────────────────────────────
+  document.querySelectorAll("#themeSeg button").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      document.querySelectorAll("#themeSeg button").forEach(function(b){ b.classList.remove("on"); });
+      btn.classList.add("on");
+      document.documentElement.setAttribute("data-theme", btn.dataset.th);
+      build();
+    });
+  });
+
+  var on = true;
+  $("btnEnable").addEventListener("click", function(){
+    on = !on; BFfx.setEnabled(on);
+    this.textContent = "特效：" + (on ? "开" : "关");
+    this.classList.toggle("on", on);
+  });
+
+  // ── chip helper ─────────────────────────────────────────────────────
+  function chip(i){ return document.querySelectorAll("#npcbar .npc")[i % NPCS().length]; }
+  function flash(el, cls, ms){
+    el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+    setTimeout(function(){ el.classList.remove(cls); }, ms || 700);
+  }
+
+  // ── individual effects ──────────────────────────────────────────────
+  var FX = {
+    trail: function(){
+      var pot = $("pot");
+      pot.classList.remove("crashed","caught");
+      pot.style.transition = "none";
+      pot.style.left = "12%"; pot.style.top = "48px"; pot.style.opacity = "1";
+      void pot.offsetWidth;
+      pot.classList.add("held","flying");
+      BFfx.trail(pot, true);
+      pot.style.transition = "left 1.5s cubic-bezier(.3,-0.1,.4,1.15), top 1.5s cubic-bezier(.2,.5,.4,1), opacity .3s";
+      pot.style.left = "86%"; pot.style.top = "300px";
+      setTimeout(function(){
+        BFfx.trail(pot, false);
+        pot.classList.remove("held","flying");
+        pot.classList.add("caught");
+        setTimeout(function(){ pot.style.opacity = "1"; pot.classList.remove("caught"); }, 900);
+      }, 1500);
+    },
+    hit: function(){ var c = chip(0); flash(c, "hit"); },
+    reject: function(){ var c = chip(1); flash(c, "reject"); },
+    freeze: function(){ var c = chip(2); flash(c, "hold"); },
+    beam: function(){
+      var isOn = !stage.classList.contains("climax");
+      stage.classList.toggle("climax", isOn);
+      document.querySelector('[data-fx="beam"]').classList.toggle("on", isOn);
+    },
+    ending: function(){
+      var isOn = !stage.classList.contains("ending");
+      stage.classList.toggle("ending", isOn);
+      document.querySelector('[data-fx="ending"]').classList.toggle("on", isOn);
+    },
+    crash: function(){
+      var pot = $("pot");
+      pot.style.transition = "none";
+      pot.style.left = "50%"; pot.style.top = "250px"; pot.style.opacity = "1";
+      pot.classList.remove("held","flying","caught");
+      void pot.offsetWidth;
+      pot.classList.add("crashed");
+      setTimeout(function(){ pot.classList.remove("crashed"); pot.style.opacity = "1"; }, 700);
+    },
+    slowmo: function(){
+      var isOn = !stage.classList.contains("slowmo");
+      stage.classList.toggle("slowmo", isOn);
+      document.querySelector('[data-fx="slowmo"]').classList.toggle("on", isOn);
+    }
+  };
+  document.querySelectorAll("[data-fx]").forEach(function(b){
+    b.addEventListener("click", function(){ FX[b.dataset.fx](); });
+  });
+
+  // ── play-all script ─────────────────────────────────────────────────
+  var seq = 0;
+  $("btnAuto").addEventListener("click", function(){
+    seq++; var my = seq;
+    function step(fn, at){ setTimeout(function(){ if (seq === my && on) fn(); }, at); }
+    FX.crash(); step(FX.trail, 700);
+    step(FX.hit, 2500); step(function(){ flash(chip(3), "hit"); }, 3000);
+    step(FX.reject, 3500); step(FX.freeze, 4300);
+    step(function(){ FX.slowmo(); }, 5100);
+    step(function(){ FX.beam(); }, 5900);
+    step(function(){
+      FX.slowmo(); FX.beam(); FX.ending();
+    }, 8600);
+    step(function(){
+      step(FX.ending, 1000); FX.crash(); FX.trail();
+      setTimeout(function(){ if (seq === my) { FX.beam(); } }, 2400);
+    }, 11500);
+  });
+
+  // esc stops
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape") { seq++; FX.beam(); FX.ending(); FX.slowmo(); }
+  });
+})();
+</script>
+</body>
+</html>

@@ -172,6 +172,67 @@
     if (cb) cb.checked = castFilter;
   }
 
+  // ─────────────── 音量 / 静音设置（localStorage 持久化）───────────────
+  var BGM_VOL_KEY = "bf.bgmVolume";   // 0~1
+  var SFX_VOL_KEY = "bf.sfxVolume";   // 0~1
+  var MUTE_KEY = "bf.muted";          // "1"/"0"
+  var audioBgmVol = 0.55;             // 当前 BGM 音量（0~1）
+  var audioSfxVol = 0.8;              // 当前 SFX 音量（0~1）
+  var audioMuted = false;             // 当前静音
+
+  function loadAudioSettings() {
+    try {
+      var b = parseFloat(localStorage.getItem(BGM_VOL_KEY));
+      var s = parseFloat(localStorage.getItem(SFX_VOL_KEY));
+      var m = localStorage.getItem(MUTE_KEY) === "1";
+      if (!isNaN(b)) audioBgmVol = Math.max(0, Math.min(1, b));
+      if (!isNaN(s)) audioSfxVol = Math.max(0, Math.min(1, s));
+      audioMuted = m;
+    } catch (e) { /* 隐私模式忽略 */ }
+  }
+  function saveAudioSettings() {
+    try {
+      localStorage.setItem(BGM_VOL_KEY, String(audioBgmVol));
+      localStorage.setItem(SFX_VOL_KEY, String(audioSfxVol));
+      localStorage.setItem(MUTE_KEY, audioMuted ? "1" : "0");
+    } catch (e) { /* 隐私模式忽略 */ }
+  }
+  // 把当前设置应用到音频引擎（引擎未 init 也没关系，init 时会读这些值）
+  function applyAudioSettings() {
+    if (!window.BFAudio) return;
+    BFAudio.setBgmVolume(audioBgmVol);
+    BFAudio.setSfxVolume(audioSfxVol);
+    BFAudio.setMuted(audioMuted);
+  }
+  function syncAudioUI() {
+    var bv = $("set-bgm-vol"), sv = $("set-sfx-vol");
+    if (bv) bv.value = String(Math.round(audioBgmVol * 100));
+    if (sv) sv.value = String(Math.round(audioSfxVol * 100));
+    var bvv = $("set-bgm-vol-val"), svv = $("set-sfx-vol-val");
+    if (bvv) bvv.textContent = Math.round(audioBgmVol * 100) + "%";
+    if (svv) svv.textContent = Math.round(audioSfxVol * 100) + "%";
+    var mb = $("btn-mute");
+    var mi = $("mute-icon");
+    if (mb) mb.textContent = audioMuted ? " 已静音" : " 声音开";
+    if (mi) mi.src = audioMuted ? "assets/icons/ic-sound-off.png" : "assets/icons/ic-sound-on.png";
+    if (mb) mb.title = audioMuted ? "已静音 · 点击打开声音" : "声音开 · 点击静音";
+  }
+  function bindAudioControls() {
+    var bv = $("set-bgm-vol"), sv = $("set-sfx-vol"), mb = $("btn-mute");
+    if (bv) bv.addEventListener("input", function () {
+      audioBgmVol = parseInt(this.value, 10) / 100;
+      saveAudioSettings(); applyAudioSettings(); syncAudioUI();
+    });
+    if (sv) sv.addEventListener("input", function () {
+      audioSfxVol = parseInt(this.value, 10) / 100;
+      saveAudioSettings(); applyAudioSettings(); syncAudioUI();
+    });
+    if (mb) mb.addEventListener("click", function () {
+      audioMuted = !audioMuted;
+      saveAudioSettings(); applyAudioSettings(); syncAudioUI();
+    });
+  }
+
   // ═══════════════════════ NPC 栏 ═══════════════════════
   function buildNpcBar() {
     var bar = $("npcbar");
@@ -402,6 +463,7 @@
 
     S.held = p;
     p.state = "held";
+    if (window.BFAudio) BFAudio.playSfx("click");
     S.holdLeft = HOLD_BUDGET;
     S.holdMax = HOLD_BUDGET;
     S.freeClockGranted = false;
@@ -441,6 +503,7 @@
     var p = S.held;
     if (!p) return;
     S.slipCount++;
+    if (window.BFAudio) BFAudio.playSfx("slip");
     S.held = null;
     S.target = null;
     clearTargetable();
@@ -607,6 +670,7 @@
     S.busy = true;
     S.held = null;
     S.target = null;
+    if (window.BFAudio) BFAudio.playSfx("whoosh");
     $("stage").classList.remove("slowmo");
     $("actor").classList.remove("armed");
     clearTargetable();
@@ -736,6 +800,7 @@
     }
 
     if (res.caught) {
+      if (window.BFAudio) BFAudio.playSfx("catch");
       $("flash").className = "flash umb";
       void $("flash").offsetWidth;
       $("flash").className = "flash umb";
@@ -927,6 +992,8 @@
     var a = S.t < 20 ? 1 : (S.t < 40 ? 2 : (S.t < 55 ? 3 : 4));
     if (a === S.act) return;
     S.act = a;
+    // 切幕切换 BGM（段间交叉淡化）
+    if (window.BFAudio) BFAudio.playBgm(a);
     $("hud-act").textContent = ACT_LABEL[a];
     $("hud-act-name").textContent = ACTS[a].name;
     var line = $("hud-act").parentNode;
@@ -985,6 +1052,7 @@
 
   // ═══════════════ 结尾 · 只剩你（剩余 5-0s）═══════════════
   function enterEnding() {
+    if (window.BFAudio) BFAudio.playSfx("ending");
     $("stage").classList.add("ending");
     $("ending-note").hidden = false;
     // 预加载结尾平底锅图：spawnEndingPot 在 1200ms 后才起，先预载避免弱网空帧
@@ -1028,6 +1096,7 @@
   /** 结尾：把锅甩向主角 = 自己背。不加分不扣血，只给情绪落点，然后滑入卷宗 */
   function endingCarry(p) {
     closePanel();
+    if (window.BFAudio) BFAudio.playSfx("blame");
     S.held = null;
     S.target = null;
     $("stage").classList.remove("slowmo");
@@ -1105,6 +1174,8 @@
     S.paused = !!on;
     $("pause-overlay").hidden = !S.paused;
     $("btn-pause").textContent = S.paused ? "▶" : "⏸";
+    // 暂停时 BGM 压音，恢复时还原
+    if (window.BFAudio) BFAudio.setPaused(S.paused);
     devLog(S.paused ? "暂停 · 世界冻结" : "继续", "dim");
   }
   function togglePause() {
@@ -1119,6 +1190,7 @@
     $("btn-pause").textContent = "⏸";
     S.phase = "title";
     showScreen("screen-title");
+    if (window.BFAudio) BFAudio.playTitle();
   }
 
   // ═══════════════════════ 主循环 ═══════════════════════
@@ -1387,6 +1459,11 @@
   function startGame() {
     S = freshState();
     S.phase = "playing";
+    // 音频：首次点击开始 = 用户手势，此时初始化 AudioContext 并起幕1 BGM
+    if (window.BFAudio) {
+      BFAudio.init();
+      BFAudio.playBgm(1);
+    }
     $("pause-overlay").hidden = true;
     $("btn-pause").textContent = "⏸";
     $("stage").classList.remove("climax", "ending");
@@ -1455,7 +1532,7 @@
   function bind() {
     $("btn-start").addEventListener("click", startGame);
     $("btn-again").addEventListener("click", startGame);
-    $("btn-home").addEventListener("click", function () { S.phase = "title"; showScreen("screen-title"); });
+    $("btn-home").addEventListener("click", function () { S.phase = "title"; showScreen("screen-title"); if (window.BFAudio) BFAudio.playTitle(); });
 
     // ── 暂停：舞台按钮 + 遮罩三件 ──
     // stopPropagation：暂停按钮在 #stage 里，不拦的话点它会被空白点击当成「放手锅」。
@@ -1733,9 +1810,24 @@
     bind();
     loadFreeTimer(); syncFreeTimerUI();
     loadCastFilter(); syncCastFilterUI();
+    loadAudioSettings(); syncAudioUI(); bindAudioControls();
     initAiSet();
 
     updateMetaMode();
+    // ── 标题面待机 BGM：需用户手势才能启动 AudioContext（浏览器自动播放策略）。
+    // 首次任意交互（点击/按键/触摸）时初始化音频引擎并播放标题 BGM；之后由 playBgm/playTitle 接管切换。
+    if (window.BFAudio) {
+      // 先应用持久化的音量/静音设置（init 前设置好，init 时直接用）
+      applyAudioSettings();
+      var bootAudio = function () {
+        BFAudio.init();
+        BFAudio.playTitle();
+        document.removeEventListener("pointerdown", bootAudio);
+        document.removeEventListener("keydown", bootAudio);
+      };
+      document.addEventListener("pointerdown", bootAudio);
+      document.addEventListener("keydown", bootAudio);
+    }
     // ── 暖机必须立刻、并行启动，绝不能排在 checkBackend 之后 ──
     // 这是「刚刷新就开局=无 AI，等一会儿再开局=有 AI」的根因：Vercel serverless
     // 冷启动下 checkBackend 的 health 探测可能要 8s 超时 + 0.7s + 重试 ≈ 17s 才 resolve，
