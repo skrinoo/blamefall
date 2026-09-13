@@ -261,20 +261,36 @@
       if (!pool || !pool.length) return miss;
       entry = pool[genericCursor[argType]++ % pool.length];
       if (!entry) return miss;
-      return shape(entry, "generic");
+      return shape(entry, "generic", npcId + "::" + argType);
     }
-    return shape(entry, "library");
+    return shape(entry, "library", npcId + "::" + argType);
   }
 
   /** 通用文案的轮换游标（每种论证类型独立计数） */
   var genericCursor = { "事实型": 0, "情感型": 0, "转移型": 0, "反向型": 0, "荒诞型": 0 };
 
-  function shape(entry, source) {
+  // reaction 变体游标：同一 (npcId, 论证类型) 反复甩时，按次数轮换数组里的多条回复，
+  // 避免玩家连续甩同一人时看到一模一样的台词（修改 2 · 丰富回复）。
+  var reactionCursor = {};
+
+  /** 取一条 reaction：字符串原样返回；数组则按游标轮换返回 */
+  function pickVariant(v, key) {
+    if (Array.isArray(v)) {
+      if (!v.length) return "";
+      var c = reactionCursor[key] || 0;
+      reactionCursor[key] = c + 1;
+      return v[c % v.length];
+    }
+    return v || "";
+  }
+
+  function shape(entry, source, key) {
     return {
       technique: entry.technique || "",
       verdict: entry.verdict || "",
-      reactionSuccess: entry.reaction_success || "",
-      reactionFail: entry.reaction_fail || "",
+      // 支持数组变体：同一 (npc, 论证类型) 反复甩时轮换，避免文案单调
+      reactionSuccess: pickVariant(entry.reaction_success, key + ":ok"),
+      reactionFail: pickVariant(entry.reaction_fail, key + ":no"),
       hit: true,
       source: source
     };

@@ -1558,3 +1558,135 @@ if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch()
 - 暗版 `assets/icons/` 共 27 个图标 + 暗版 pan-v1-1024.webp 等大文件仍在仓库，但代码已不引用 —— 可继续按需清理
 
 **教训**：「**压缩已加载的 + 删除未加载的**」是两条独立优化路径，前者改感官速度（单资源小），后者改工程速度（仓库小）。这一轮两条都做了，合计仓库 -16.2MB / 单资源 -78%，体感会叠加。
+
+
+---
+
+## 33. 特效层坐标修复 + 失败/冷战惩罚 + 变体回复扩充（2026-09-13）
+
+本轮三个看似独立的问题，根因都落在「坐标 / 数量 / 文本」三个最朴素的方向：
+
+### 33.1 特效「坐标错位」彻底修复：两步走，从 `#stage` 到 body 顶层
+
+**症状（用户实锤）**：「有时甩锅给食堂阿姨，左侧室友这里却有类似火花的亮光。」
+
+**修复尝试 ① — 移出 `#stage`**：把 `<div id="fx">` 从 `#stage` 内（absolute inset:0）挪到 `</main>` 后，并改成 `position:fixed; inset:0`。理由：NPC chip 在 `#npcbar`（stage 之外的 footer），`fx.js` 的 `centre(el) = el.getBoundingClientRect() - #fx.getBoundingClientRect()` 算偏移，chip 在 stage 外时 y 超出 stage 范围被 `overflow:hidden` 裁剪。用户复测：「特效有时还是偏移」—— 没修干净。
+
+**修复尝试 ② — 移出 `#screen-game`**：深入排查发现 `#screen-game` 本身是 `position:fixed`（`.screen { position:fixed; inset:0 }`），且「砸锅震动」用 `#screen-game.shake { animation: shake .4s ease; }`（`@keyframes shake` 包含 `transform: translate3d`）。两条 css 规则叠在一起：fixed 元素的 containing block 规则 + transform 改变 containing block —— `#fx` 此时**不再相对 viewport**，而是相对 `#screen-game`（带 transform 动画的 fixed 元素）的盒子。粒子按「视口坐标」算的 x/y，落到「screen-game 局部坐标」上，shake 期间视口与 screen 错位 → 火花「飘到别的 NPC 上」。
+
+**最终修复**：把 `#fx` 挪到 body 直接子元素（devpanel `</div>` 之后、`<script>` 之前），并 `position:fixed; inset:0`。body / html 自身不带 transform/filter/perspective，所以 fixed 元素的 containing block 退回 viewport，shake 也碰不到它。
+
+**代码**（`index.html` 关键注释）：
+```html
+<!-- 特效层：body 直接子元素 + fixed 全视口。放在所有 section 之外，
+     不受 .screen 的 position:fixed / shake(transform) 影响，粒子永远用
+     视口坐标落位（fx.js 的 centre()/local() 拿 getBoundingClientRect 减
+     #fx 的 rect，body 层 fixed 时两者都是纯视口坐标）。 -->
+<div id="fx"></div>
+```
+
+`style.css:376` 的 `#fx` 规则保持 `position:fixed; inset:0; pointer-events:none; z-index:25;`。
+
+**验证**（`bf/verify_fx_v2.js`，headless Edge + CDP `Runtime.evaluate`）：
+- `#fx` 的 `parentNode.tagName === 'BODY'`、body/html 无 transform
+- 在 `#screen-game.shake` 动画进行中甩锅给食堂阿姨（chip 中心 616,600），hit 触发的 `.fxhalo` 与 `.fxring` 粒子落点都是 **dx=0, dy=0** —— 完美对齐
+- 截图 `bf/shot-fx-shake.png` / `bf/shot-fx-after.png` 视觉验证 chip 高亮 + 火花都落在正确位置
+
+**教训**：fixed 定位的 containing block 陷阱极其隐蔽 —— fixed + transform + parent-absolute 三者叠加时，谁都不知道粒子最后落到哪。**根除方案是把特效层放到「绝对不会被任何东西 transform 的容器」**（body 顶层是最稳的选择）。
+
+### 33.2 失败 / 冷战惩罚增强：让「不该甩」真的有代价
+
+**需求**：原版失败 `score=0, shadowDelta=3`、冷战 `shadowDelta=3` —— 玩家甩错人几乎没成本，背锅学不到教训。
+
+**改动**（`engine/judge.js`）：
+- **冷战分支**（关系值跌破 `coldWarAt`）：`shadowDelta: 3 → 5`，新增 `score: -20`
+- **失败分支**（论证失败 / cast 不匹配）：`score: 0 → -15`，`shadowDelta: 3` 保持
+
+**配套**（`game.js` 的 `finishThrow` 失败分支）：`floatAt` 文案从 `-0 分` 改为同时显示负分和阴影（`parts.join("  ")` 拼出 `-15 分  阴影 +3`），让玩家在屏上立刻看到「输了代价」。
+
+**验证**（`bf/verify_fx_penalty.js` 直接调 `JudgeEngine.judge()`）：
+- fail 分支 `{ success:false, score:-15, shadow:3 }` ✓
+- cold 分支 `{ success:false, score:-20, shadow:5 }` ✓（关系值设到 20 < coldWarAt 30）
+
+### 33.3 变体回复批量扩充：10 个 NPC × 5 论证类型 = 50 条反应
+
+**背景**：上轮§33 之前只给 `didi`（学弟学妹）和 `roommate`（室友）的 `reaction_success` 升级为双条数组 + `engine/fallback.js` 写好 `pickVariant()` + `reactionCursor` 轮换机制。但**其他 8 个 NPC**（moyu/xuezhang/daoshi/jiaowu/fudaoyuan/shitang/suguan/ex）的 `reaction_success` 还是单条字符串 —— 用户反馈「变体回复没生效」，根因就是甩这些 NPC 时永远显示同一句台词。
+
+**修复**：把 8 个 NPC × 5 论证类型 = 40 条 `reaction_success` 全部从字符串升级为 `[原文, 变体]` 数组（保留原文不变，添加符合人设 + 论证类型的变体）。每条变体的设计原则：
+- **保持人设**：moyu 油腻敷衍 / xuezhang 老练包装 / daoshi 极短权威 / jiaowu 模板公文 / fudaoyuan 永远「你再想想」/ shitang 烟火温情 / suguan 认本子 / ex 冷短句
+- **保持论证类型语义**：事实型举证 / 情感型共情 / 转移型划边界 / 反向型倒推 / 荒诞型胡扯
+- **≤ 20 字**（气泡不撑破布局，沿用 §0 第 5 条精修记录）
+
+**变体示例**：
+| NPC | 类型 | 原文 | 变体 |
+|---|---|---|---|
+| moyu | 事实型 | 好吧，那我把这部分赶一下。 | 行行行，别催了，我去补一下。 |
+| xuezhang | 情感型 | 唉，我带你们这么累还图什么。 | 我为社团掏心掏肺，最后还背锅。 |
+| daoshi | 事实型 | 签字栏是你签的。 | 落款人是你。 |
+| jiaowu | 转移型 | 此事项转交相关科室承办。 | 已按程序转至对口部门。 |
+| fudaoyuan | 情感型 | （拍肩）你再想想，别都堆自己心里。 | （递水）你再想想，身体也要顾。 |
+| shitang | 情感型 | 快别哭啦，累了就来阿姨这喝碗热汤。 | 孩子，这儿风大，先喝口水暖暖。 |
+| suguan | 转移型 | 后勤没交接清楚……我先接下。 | 交接班签字缺一栏……我先顶。 |
+| ex | 事实型 | 聊天记录有时间戳。 | 截图还在。 |
+
+**抽象 NPC**（tianqi/shuini/xingzuo）保持单条 —— 它们 `reaction_success` 永远成功（规则上不可能拒绝），`reaction_fail` 固定为「（它无法拒绝）」，文案单调是设计本意，**不应补变体**（补了反而破坏「无表情」的无辜感）。
+
+**验证**（`bf/verify_variants.js`，遍历 40 组合 + 3 次调用看轮换）：
+- 40/40 全部 PASS（`rawArrLen >= 2` 且 `r1 ≠ r2` 且 `r1 == r3` —— 游标 mod 2 周期性回到第一条）
+- 轮换方向符合预期：同 (npcId, 论证类型) 反复甩时按 0→1→0→1 切换，不会在两次甩同一人时看到同一句台词
+
+**用户实操**：现在无论甩哪个普通 NPC（学弟/室友/摸鱼/学长/导师/教务/辅导员/食堂/宿管/前任），连甩同一人的 2~3 次都会换一条不同的回复，符合「丰富回复」的预期。
+
+
+---
+
+## 34. reaction_fail 变体补齐：50 条「被甩锅后的反驳」（2026-09-13）
+
+**需求**：§33.3 只补了 `reaction_success`（接锅台词），`reaction_fail`（拒绝接锅台词）仍全部是单条字符串。用户要求「给 reaction_fail 也批量补变体」。
+
+**改动**（`data/verdicts.js`）：10 个普通 NPC × 5 论证类型 = 50 条 `reaction_fail` 从字符串升级为 `[原文, 变体]` 数组。
+
+**语义要点**：`reaction_fail` 是「NPC **拒绝**接锅时的台词」，语气与 `reaction_success` 相反 —— 是反驳、推脱、质疑甩锅者，而不是认账。变体设计遵循两条：
+- **保持人设**：didi 唯唯诺诺 / roommate 翻旧账 / moyu 甩回来 / xuezhang 用规章堵 / daoshi 极短压人 / jiaowu 模板公文 / fudaoyuan 永远「你再想想」/ shitang 温吞推脱 / suguan 认本子 / ex 冷短句
+- **贴合论证类型语义**：事实型要证据 / 情感型打感情牌 / 转移型划边界 / 反向型反将一军 / 荒诞型戳破胡扯
+
+**补齐的缺漏**：didi::荒诞型、roommate::反向型、roommate::荒诞型 原本 **`reaction_fail` 缺省**（`E()` 只传了 3 个参数），本轮一并补上完整的双条数组，消除了「甩这类锅失败时气泡空白」的隐患。
+
+**变体示例**：
+| NPC | 类型 | 原文（拒绝）→ 变体 |
+|---|---|---|
+| didi | 事实型 | 学长，这个真的不在我范围内呀。→ 可、可这事真不是我经手的呀。 |
+| roommate | 事实型 | 放屁，上周明明是你自己没搞好。→ 你翻翻记录，那天谁在宿舍？ |
+| moyu | 反向型 | 别倒打一耙，主导的人是你。→ 你自己没盯住，怪我咯？ |
+| daoshi | 荒诞型 | 科研讲究严谨证据。→ 别拿直觉当依据。 |
+| jiaowu | 荒诞型 | 网络数据正在同步更新中。→ 系统升级中，请稍后再试。 |
+| fudaoyuan | 反向型 | 你再想想，因果不能这么倒过来。→ 你再想想，别急着甩出去。 |
+| shitang | 事实型 | 锅可不能乱扣，阿姨还要盛饭呢。→ 这锅可沉，阿姨端不动。 |
+| suguan | 反向型 | 我天天查寝，你倒甩我头上了？→ 你自己不锁门，倒怪起我来了。 |
+| ex | 荒诞型 | 信号不好，听不见。→ 别玄乎了，我很清醒。 |
+
+**抽象 NPC 不补**（tianqi/shuini/xingzuo）：`reaction_fail` 固定「（它无法拒绝）」是规则层写死的（它们规则上不可能拒绝），补变体反而破坏「无表情」的无辜感。
+
+**验证**（`bf/verify_variants.js` 改造为双字段断言）：遍历 10 NPC × 5 类型，断言 `reaction_success` 与 `reaction_fail` **都** `arrLen >= 2` 且各自轮换（`r1 ≠ r2`）。**50/50 全部 PASS**。
+
+**教训**：`reaction_fail` 与 `reaction_success` 是**语义相反**的两套台词，补变体时不能照搬「认账」语气的句式，必须反过来设计成「反驳/推脱」，否则会出现「NPC 嘴上拒绝、台词却像要接」的割裂感。另外用脚本遍历 `raw.reaction_fail` 是否 `Array.isArray` 能一次性揪出所有「缺第 4 参数的 E()」漏网条目（本轮揪出 3 条）。
+
+
+---
+
+## 35. generic 兜底 reaction 缺失修复：补上最后一环（2026-09-13）
+
+**需求**：用户反馈「甩锅失败只有一种回答」（快速选项反复甩同一人）。§33/§34 已补全 entries 库 10 个 NPC 的变体，但失败台词仍可能单调。
+
+**排查**（沿 reaction 完整取值链逐层检查）：
+1. **引擎层轮换正常**：连续 4 次甩 `shitang::荒诞型`，`reactionFail` 正确轮换 A→B→A→B（`bf/verify_fail_rotate.js` 实证）
+2. **固定分支**（不轮换，但语义合理）：sceneMismatch（仅 ex，`"？"`）/ coldWar（`"（转过身去）"`）/ 反向型未解锁（`""`）
+3. **真根因 —— generic 兜底缺 reaction**：`data/verdicts.js` 的 `generic` 15 条 `E()` 只传了 `technique` + `verdict`，**`reaction_success` / `reaction_fail` 全是 `undefined`**。当甩 (NPC, 论证类型) 组合未命中 entries 库时走 generic，reaction 为空，最终落到 `judge.js pickReaction` 的固定兜底 `"（对方没有接话，锅就这么留下了。）"` —— 永远一样。
+
+**触发场景**：抽象 NPC（tianqi/shuini/xingzuo）的 entries 库里只有 `事实/情感/荒诞` 三种类型，甩「转移型」「反向型」必走 generic → 固定兜底。
+
+**修复**（`data/verdicts.js`）：给 generic 15 条 `E()` 全部补上 `reaction_success` / `reaction_fail` 双条数组，语气中性通用（适配任意 NPC），同样可轮换。
+
+**验证**（`bf/verify_generic.js`）：甩「转移型」给 tianqi 连续 4 次，`reactionFail` 依次「这不归我管」→「你那段别推给我」→「制度不背这个锅」→「找错人了」；generic 15 条全部补全（`missing: []`）。
+
+**教训**：「轮换机制正确」≠「所有路径都轮换」。要沿 reaction 的**完整取值链**逐层排查：entries 命中 → generic 兜底 → `pickReaction` 的 `ai → npc.fixedReaction → 固定句`，看哪个环节把变体「截断」成单条。查表主路径补全了，但 generic 兜底的 `E()` 漏传 reaction 字段，抽象 NPC 非库类型甩锅时就会固定落一句兜底台词。

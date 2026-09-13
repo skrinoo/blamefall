@@ -365,7 +365,6 @@
       }
     }
     if (el.id === "stage") {
-      beam(cl.contains("climax"));
       pulse(cl.contains("ending"));
       embers(cl.contains("ending"));
       motes(cl.contains("slowmo"));

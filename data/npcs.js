@@ -58,6 +58,7 @@
       reflectChance: 0,
       kind: "normal",
       scene: null,
+      fromPastReaction: "学长，这锅都不是我接的，你从过去寄过来算什么意思啊？",
       desc: "讨好型，几乎不会拒绝，回答里常带犹豫和自我说服，从不抱怨"
     },
     {
@@ -118,6 +119,7 @@
       reflectChance: 0.35,
       kind: "normal",
       scene: null,
+      fromPastReaction: "过去的锅也算锅？少拿这套糊弄我，我不吃。",
       desc: "甩锅老手，擅长把责任包装成「锻炼机会」，反甩时会用这句话"
     },
     {
@@ -137,6 +139,7 @@
       reflectChance: 0,
       kind: "normal",
       scene: null,
+      fromPastReaction: "少来。",
       desc: "权力上位，语气平淡而有压迫感，不解释理由，一句话就能让人闭嘴"
     },
     {
@@ -161,6 +164,7 @@
       scene: null,
       // 兑现 desc 里早已写下、但引擎一直没实现的承诺（见 fallback.js FORMAL_WORDS）
       formalBonus: true,
+      fromPastReaction: "该事项不属于本部门受理权限，请勿甩锅。",
       desc: "官僚系统，只会输出模板化公文用语；理由含书面语时说服力额外加成"
     },
     {

@@ -242,7 +242,10 @@
     if (inColdWar(npc, state)) {
       result.success = false;
       result.reflected = true;
-      result.shadowDelta = 3;
+      // 修改 1：甩给「已经进入冷战、本局不再理你」的角色是双重失误 ——
+      // 惩罚从 +3 阴影上调到 +5，并额外扣 20 分（你明知道甩不动还要甩）。
+      result.shadowDelta = 5;
+      result.score = -20;
       result.verdict = npc.name + "已经进入冷战状态，本局不再接受任何责任转移。";
       result.reaction = "（转过身去）";
       events.push("coldWar");
@@ -373,15 +376,35 @@
     // ── 10. 结算数值 ──────────────────────────────────────
     if (result.success) {
       var mult = critical ? CRIT_MULTIPLIER : 1;
+      // 来自过去自己的锅甩给别人背：扣分×2、阴影×2。
+      // 设计意图：玩家把「本来该自己承担」的责任甩给同伴，
+      // 同伴接到的瞬间成本翻倍 —— 别人替你扛的"过去的你"贵一倍。
+      if (pot && pot.fromPast) mult *= 2;
       result.score = Math.round(100 * npc.difficulty * mult);
-      result.shadowDelta = (npc.moralCost === "高") ? 2 : -1;
+      // 阴影代价按 moralCost 算基准值，再按 fromPast 翻倍（绝对值翻倍，符号保留）
+      var baseShadow = (npc.moralCost === "高") ? 2 : -1;
+      if (pot && pot.fromPast) {
+        baseShadow = baseShadow * 2;
+      }
+      result.shadowDelta = baseShadow;
       result.relationDelta = npc.relationStep;
       events.push("success");
     } else {
-      result.score = 0;
+      // 修改 1：甩锅失败不止「没得分」，还要付出代价 —— 阴影 +3（原值）并扣 15 分。
+      // 设计意图：失败不该只是「白费一次机会」，它得让玩家肉疼，
+      // 否则「乱甩试错」没有任何风险，博弈就退化成碰运气。
+      result.score = -15;
       result.shadowDelta = 3;
       result.relationDelta = Math.round(npc.relationStep / 2);  // 失败也伤关系，但减半
       events.push("fail");
+    }
+
+    // ── 11. 来自过去的自己的锅：替换反应为对方生气回复 ─────
+    // 即使常规判定成功 / 失败 / 反甩，文案统一换成「NPC 个性化的生气语气」。
+    // 这一层在结算后做，pickReaction 已经写过一条默认 reaction，
+    // 这里强制覆盖为 fromPastReaction（若 NPC 没提供则保留默认）。
+    if (pot && pot.fromPast && npc.fromPastReaction) {
+      result.reaction = npc.fromPastReaction;
     }
 
     return result;

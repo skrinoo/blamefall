@@ -370,7 +370,10 @@ html[data-theme="light"] .screen::before {
     radial-gradient(ellipse 55% 40% at 50% -8%, rgba(139,92,246,.09), transparent 70%);
 }
 #sky { position: absolute; inset: 0; }
-#fx   { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+/* 特效层：fixed 全视口，粒子用视口坐标落位（见 index.html 注释）。
+   z-index 低于 #blackout(70)/#flash(60) 但高于 stage 内容，确保火花/光环
+   盖在 NPC chip 与锅之上，又不会遮住结算遮罩。 */
+#fx   { position: fixed; inset: 0; pointer-events: none; z-index: 25; }
 
 /* ── 锅 ─────────────────────────────────────────────── */
 .pot {
@@ -884,6 +887,86 @@ table.log .tech { color: var(--ink); }
 @keyframes panGlow {
   0%, 100% { filter: drop-shadow(0 0 10px rgba(155, 120, 255, .4)); }
   50%      { filter: drop-shadow(0 0 24px rgba(155, 120, 255, .8)); }
+}
+
+/* ═══════════════════════ 修改 2 · 高潮幕平底锅图 ═══════════════════════ */
+/* 高潮幕的锅不再显示方框卡片，用平底锅图取代：去方框、去边框、铺平底锅背景图，
+   按出生方向旋转（握把朝背离环心方向）—— --climax-rot 由 game.js 在每口锅生成时计算。
+   background-image 由 game.js 直接写入 inline style（按主题切换亮/暗版）。 */
+.pot.climax-pan {
+  width: 110px;
+  height: 110px;
+  padding: 0;
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  /* 中心点放在锅体中心（视觉重心），旋转时不会跳 */
+  transform: translate(-50%, -50%) rotate(var(--climax-rot, 0deg));
+  transform-origin: center center;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.55));
+}
+.pot.climax-pan .pot-top,
+.pot.climax-pan .pot-text,
+.pot.climax-pan .pot-hold { display: none !important; }   /* 高潮幕锅不显示文字卡片 */
+
+/* ═══════════════════════ 修改 4 · 来自过去的自己 锅标记 ═══════════════════════ */
+.pot.pot-deferred {
+  /* 视觉强调：边框变紫、底色微亮，玩家一眼能识别「这口锅来历不一样」 */
+  border-color: rgba(139, 92, 246, .6);
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, .4),
+              0 10px 26px -10px rgba(0,0,0,.9),
+              inset 0 1px 0 rgba(255,255,255,.06);
+}
+.pot.pot-deferred .pot-past-tag {
+  /* 「来自过去的自己」小字：贴在锅卡片顶部、紫色斜体小字 */
+  display: block;
+  margin-top: 6px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  letter-spacing: .1em;
+  font-style: italic;
+  color: rgba(139, 92, 246, .85);
+  text-align: center;
+}
+
+/* ═══════════════════════ 修复 1 · 结尾巨锅甩脸 overlay ═══════════════════════ */
+#ending-blame-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 50;
+  pointer-events: none;             /* 默认不挡事件，.show 才挡 */
+  opacity: 0; visibility: hidden;
+  transition: opacity .35s ease, visibility .35s;
+}
+#ending-blame-overlay.show {
+  opacity: 1; visibility: visible;
+  pointer-events: auto;             /* .show 期间挡住一切交互 */
+}
+#ending-blame-overlay .ending-blame-giant {
+  /* 巨锅图占屏幕约 70%，靠下偏中，留出顶部/底部给字幕 */
+  width: min(70%, 720px);
+  height: auto;
+  /* 进场动效：从右上方向主角（左下）砸来，2.4s 后 overlay 整体淡出 */
+  animation: blameSlam 0.55s cubic-bezier(.3, -0.1, .5, 1.2) forwards;
+  filter: drop-shadow(0 0 30px rgba(240, 165, 44, .35));
+}
+#ending-blame-overlay .ending-blame-sub {
+  /* 字幕带：贴底居中，约 60% 宽 */
+  width: min(60%, 640px);
+  height: auto;
+  margin-top: 20px;
+  animation: blameSubIn 0.5s ease 0.4s backwards;
+}
+@keyframes blameSlam {
+  0%   { transform: translate(60vw, -60vh) scale(1.6) rotate(35deg); opacity: 0; }
+  60%  { transform: translate(-6vw, 4vh) scale(0.96) rotate(-3deg); opacity: 1; }
+  100% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+}
+@keyframes blameSubIn {
+  from { opacity: 0; transform: translateY(20px) scale(.95); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* ═══════════════════════ 紧→高潮 渐黑转场 ═══════════════════════ */

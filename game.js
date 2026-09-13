@@ -56,11 +56,19 @@
   // 切换主题时遍历所有带 data-asset 的 <img> 重写 src
   function applyThemeToDom() {
     document.querySelectorAll("img[data-asset]").forEach(function (img) {
+      // 主路径：data-asset 已经是亮/暗无关的相对路径 → asset() 按主题切换 base
       img.src = asset(img.getAttribute("data-asset"));
     });
     // 标题徽章文件名随主题变（logo-b-light / logo-b-dark），单独处理
     var lg = document.getElementById("title-logo");
     if (lg) lg.src = asset(titleLogoRel());
+    // 修复 1 · ending-blame 巨锅图文件名带主题（light/dark），
+    // 不能简单用 asset() —— 必须按主题替换文件名内嵌的 -light / -dark 段。
+    var giant = document.querySelector("#ending-blame-overlay .ending-blame-giant");
+    if (giant) {
+      var theme = isLight() ? "light" : "dark";
+      giant.src = asset("ending/ending-blame-" + theme + ".webp");
+    }
     applyThemeBackgrounds();
   }
   // 背景是 CSS background-image，不随 <img> 遍历，需单独重写
@@ -125,9 +133,9 @@
   var SHADOW_BASELINE = 12;
 
   var ACTS = {
-    1: { name: "爽",   from: 0,  to: 20, spawnEvery: 3.4, fallMs: 5600, maxAir: 1, acceptBonus: 12 },
-    2: { name: "紧",   from: 20, to: 40, spawnEvery: 2.1, fallMs: 4200, maxAir: 2, acceptBonus: 0  },
-    3: { name: "高潮", from: 40, to: 55, spawnEvery: 1.5, fallMs: 3200, maxAir: 3, acceptBonus: 0  },
+    1: { name: "爽",   from: 0,  to: 20, spawnEvery: 3.0, fallMs: 5600, maxAir: 1, acceptBonus: 12 },
+    2: { name: "紧",   from: 20, to: 40, spawnEvery: 1.9, fallMs: 4200, maxAir: 2, acceptBonus: 0  },
+    3: { name: "高潮", from: 40, to: 55, spawnEvery: 1.4, fallMs: 3200, maxAir: 3, acceptBonus: 0  },
     4: { name: "结尾", from: 55, to: 60, spawnEvery: 999, fallMs: 7000, maxAir: 1, acceptBonus: 0  }
   };
   var ACT_LABEL = { 1: "第一幕", 2: "第二幕", 3: "第三幕", 4: "终幕" };
@@ -153,6 +161,8 @@
       target: null,
       act: 1,
       endPotDone: false,      // 结尾：最后一口锅是否已被「自己背」（决定时钟能否停 0 等待）
+      EndingGraceTimer: null, // 修复 1：结尾 3s 不操作 → 强制自动背锅计时器
+      EndingAutoBlame: false, // 修复 1：标记 grace timer 触发的自动背锅路径（区别于玩家主动甩）
       nextSpawn: 1.0,
       holdLeft: HOLD_BUDGET,
       holdMax: HOLD_BUDGET,     // 读秒条的分母；自由输入重置读秒时会变大
@@ -487,6 +497,23 @@
       pot.vx = (pot.tx - sx) / dist * sp;
       pot.vy = (pot.ty - sy) / dist * sp;
       pot.mode = "aim";
+      // ── 修改 2 · 高潮幕用平底锅图，握把朝背离环心方向 ───────
+      // 用 atan2(dy, dx) 算从锅→环心的角度，再旋转锅使握把反方向。
+      // 平底锅图「握把朝上」对应 rotation=0（锅体在下、握把在北），
+      // 锅从环外飞向环心时，握把要朝远离环心的一端 —— 即握把指向 (sx,sy) 方向，
+      // 把锅旋转「从锅朝环心方向」+ 180°。
+      var angleToCenter = Math.atan2(pot.ty - sy, pot.tx - sx);  // 锅 → 环心
+      var angleFromCenter = angleToCenter + Math.PI;             // 环心 → 锅（握把朝向）
+      pot.climaxRotation = (angleFromCenter * 180 / Math.PI) + 90;  // +90 把"朝上"基准转到当前方向
+      // 加 climax-pan class，CSS ::before 渲染色背景图；这里额外塞 background-image
+      // 兼容旧浏览器不支持 CSS 变量在 ::before 动态切换
+      node.classList.add("climax-pan");
+      node.style.setProperty("--climax-rot", pot.climaxRotation + "deg");
+      node.style.backgroundImage = "url(" + asset("pan/climax-pan-" + (isLight() ? "light" : "dark") + "-240.webp") + ")";
+      node.style.backgroundSize = "contain";
+      node.style.backgroundPosition = "center";
+      node.style.backgroundRepeat = "no-repeat";
+      // ── 修改 2 end ───────────────────────────────────────────
     } else {
       pot.vy = (groundY() + 120) / (pot.fallMs / 1000);   // px per game-second
     }
@@ -501,6 +528,89 @@
 
   function groundY() {
     return $("stage").clientHeight - 96;
+  }
+
+  /**
+   * 「来自过去的自己」锅生成器（修改 4）
+   *
+   * 与普通锅的区别：
+   *   1) pot.def.fromPast = true（供 judge.js 触发×2 惩罚 + 生气回复）
+   *   2) DOM 上挂 .pot-deferred class + .pot-deferred-tag「来自过去的自己」小字
+   *   3) 出生方式跟随当前幕：
+   *      - 第三幕（高潮）：从四面八方随机飞向环心（与普通高潮锅一致）
+   *      - 其余幕：纵向掉落，顶部入画
+   *   4) 不属于 anyPot 池里的 selfish 锅 —— 它是事件驱动的，不走 choosePotDef()
+   *   5) 全部玩家可见（无彩蛋灰化、无 NPCCast 过滤）
+   */
+  function spawnDeferredPot(origDef) {
+    if (!origDef) return null;
+    // 复制 def 并打 fromPast 标记
+    var def = {};
+    for (var k in origDef) def[k] = origDef[k];
+    def.fromPast = true;
+    def.id = (def.id || "def") + "-past-" + Date.now();
+
+    var stage = $("stage");
+    var w = stage.clientWidth, h = stage.clientHeight;
+    var node = el("div", "pot pot-deferred");
+    node.innerHTML =
+      '<div class="pot-top"><span class="pot-icon">' + POT_GLYPH + '</span>' +
+      '<span class="pot-scene">' + def.scene + '</span></div>' +
+      '<div class="pot-text">' + def.text + '</div>' +
+      '<div class="pot-past-tag">来自过去的自己</div>' +
+      '<div class="pot-hold"><i></i></div>';
+
+    var pot = {
+      def: def,
+      el: node,
+      x: clamp(w * (0.14 + Math.random() * 0.68), 110, Math.max(120, w - 110)),
+      y: -120,
+      vx: 0, vy: 0,
+      fallMs: ACTS[S.act].fallMs,
+      mode: "fall",
+      state: "falling"
+    };
+
+    if (S.act === 3) {
+      // 高潮：四面八方飞向环心（与普通高潮锅相同规则）
+      var m = 150;
+      var anchors = [
+        [w * (0.3 + Math.random() * 0.4), -m],
+        [w + m, h * (0.3 + Math.random() * 0.4)],
+        [w * (0.3 + Math.random() * 0.4), h + m],
+        [-m, h * (0.3 + Math.random() * 0.4)],
+        [-m, -m], [w + m, -m], [w + m, h + m], [-m, h + m]
+      ];
+      var a = anchors[Math.floor(Math.random() * 8)];
+      pot.x = a[0]; pot.y = a[1];
+      pot.tx = w / 2; pot.ty = h / 2;
+      pot.hh = 42;
+      var sx = pot.x, sy = pot.y + pot.hh;
+      var dist = Math.max(1, Math.hypot(pot.tx - sx, pot.ty - sy));
+      var sp = dist / (pot.fallMs / 1000);
+      pot.vx = (pot.tx - sx) / dist * sp;
+      pot.vy = (pot.ty - sy) / dist * sp;
+      pot.mode = "aim";
+      // 同样按 birth 方向计算握把旋转，使握把背离环心
+      var angleToCenter = Math.atan2(pot.ty - sy, pot.tx - sx);
+      pot.climaxRotation = ((angleToCenter + Math.PI) * 180 / Math.PI) + 90;
+      node.classList.add("climax-pan");
+      node.style.setProperty("--climax-rot", pot.climaxRotation + "deg");
+      node.style.backgroundImage = "url(" + asset("pan/climax-pan-" + (isLight() ? "light" : "dark") + "-240.webp") + ")";
+      node.style.backgroundSize = "contain";
+      node.style.backgroundPosition = "center";
+      node.style.backgroundRepeat = "no-repeat";
+    } else {
+      pot.vy = (groundY() + 120) / (pot.fallMs / 1000);
+    }
+
+    node.style.left = pot.x + "px";
+    node.style.top = pot.y + "px";
+    node.addEventListener("click", function (ev) { ev.stopPropagation(); grabPot(pot); });
+    $("sky").appendChild(node);
+    S.pots.push(pot);
+    devLog("来自过去的自己 · 锅落地 · fromPast=1", "dim");
+    return pot;
   }
 
   function movePots(dt) {
@@ -823,6 +933,20 @@
     if (res.suspended) S.stats.suspended = (S.stats.suspended || 0) + 1;
     if (res.caught) S.catchCount++;
     if (res.deferred) S.deferred++;
+    // ── 修改 4 · 甩给未来自己 → 2 秒后额外生成「来自过去的自己」的锅 ──
+    // 这口锅是 deferred pot 的复制：内容相同 + fromPast=true。
+    // 全部玩家可见（不走彩蛋路径）；自己背按一般背锅算，别人背扣分×2、阴影×2
+    // （fromPast 加成已在 judge.js 的步骤 10/11 实现）。
+    // 只有连锁一次：fromPast 锅不再触发新一轮 deferred。
+    if (res.deferred && !p.def.fromPast && !S.over) {
+      (function (pastDef) {
+        setTimeout(function () {
+          if (S.over || S.phase !== "playing") return;
+          spawnDeferredPot(pastDef);
+        }, 2000);
+      })(p.def);
+    }
+    // ── 修改 4 end ───────────────────────────────────────────────
 
     // ── 日志 ────────────────────────────────────
     S.log.push({
@@ -871,7 +995,11 @@
     } else {
       chip.classList.add("reject");
       setTimeout(function () { chip.classList.remove("reject"); }, 460);
-      floatAt(tr, res.shadowDelta ? "阴影 " + fmt(res.shadowDelta) : "被驳回", "bad");
+      // 失败现在有负分 + 阴影双重代价，飘字要把两条都报出来
+      var parts = [];
+      if (res.score < 0) parts.push(res.score + " 分");
+      if (res.shadowDelta) parts.push("阴影 " + fmt(res.shadowDelta));
+      floatAt(tr, parts.length ? parts.join("  ") : "被驳回", "bad");
     }
 
     // ── offCast 彩蛋（内容待定，占位实现）──────────────────
@@ -929,7 +1057,7 @@
     }
 
     S.timeScale = 0.3;                  // 气泡期间保持慢速，让玩家读完
-    var bubbleMs = res.critical || res.caught ? 3200 : 2400;
+    var bubbleMs = res.critical || res.caught ? 3000 : 2200;
     // 提前 0.2s 解锁：气泡进入「快消失」的最后 200ms 就恢复操作，玩家能立刻去点
     // 下一口锅。甩锅飞行 620ms > 200ms，新气泡必定晚于旧气泡 hideBubble，二者不冲突。
     setTimeout(function () {
@@ -1131,6 +1259,13 @@
       $("blackout").classList.remove("on");
       devLog("高潮阵 · 主角居中 · NPC 成环 · 视角拉远", "dim");
     }, 800);
+    // 高潮幕清场：之前没点的掉落锅淡出移除，不把它们带进环阵阶段（与结尾幕同理）。
+    // 持有中的锅（state==='held'）不受影响，玩家仍可继续操作。
+    S.pots.slice().forEach(function (p) {
+      if (p.state !== "falling") return;
+      p.el.classList.add("fadeout");
+      setTimeout(function () { removePot(p); }, 900);
+    });
   }
 
   // ═══════════════ 结尾 · 只剩你（剩余 5-0s）═══════════════
@@ -1173,6 +1308,32 @@
     p.vy = (p.hoverY - p.y) / 7;         // 7s 缓落到悬停位
     p.el.style.left = p.x + "px";
     p.el.style.top = p.y + "px";
+    // ── 修复 1 · 结尾 grace timer：3 秒不操作就强制背锅 ──
+    // 悬停位到达后玩家依然没抓锅 = 玩家选择了不动；
+    // 游戏不能让状态停在这里 —— 3 秒后强制让 AI 把锅甩向主角（= 自己背），
+    // 同时弹出「巨锅甩脸」overlay + 「年轻人，是时候学会自己背锅了」字幕。
+    // 进入结尾幕时就预载巨锅图（两种主题都预），避免 3 秒 grace 后才加载导致锅图瞬间空白
+    var preload = [asset("ending-blame-" + (isLight() ? "light" : "dark") + ".webp")];
+    var otherTheme = isLight() ? "dark" : "light";
+    var baseOther = isLight() ? "assets/" : "assets-light/";
+    preload.push(baseOther + "ending-blame-" + otherTheme + ".webp");
+    preload.forEach(function (u) { var p = new Image(); p.src = u; });
+    clearTimeout(S.EndingGraceTimer);
+    S.EndingGraceTimer = setTimeout(function () {
+      if (S.over || S.endPotDone) return;
+      var ep = S.pots.filter(function (q) { return q.endingPot; })[0];
+      if (!ep || ep.state !== "falling") return;
+      // 标记自动背锅路径 —— endingCarry 会据此决定是否弹巨锅 overlay
+      S.endingAutoBlame = true;
+      // 强制 grab + 立即 catch → 直接走 endingCarry
+      grabPot(ep);
+      if (S.held === ep) {
+        endingCarry(ep);
+      } else {
+        S.endingAutoBlame = false;
+      }
+    }, 3000);
+    // ── 修复 1 end ─────────────────────────────────────────────
     devLog("结尾锅 · 主角正上方缓落 · 可甩对象只剩你自己", "umb");
     return p;
   }
@@ -1186,9 +1347,19 @@
     $("actor").classList.remove("armed");
     S.busy = true;
     S.endPotDone = true;
+    // grace timer 完成使命（即使不是超时分支也清掉，避免重入）
+    clearTimeout(S.EndingGraceTimer);
     p.state = "flying";
     p.el.classList.remove("held");   // 保留 ending-pot：卡片外壳靠该类去除，移除会让 caught 动画期间闪回基础卡片底；transform 已无 scale，与 caughtAnim 不冲突
     p.el.classList.add("caught");
+    // ── 修复 1 · 自动背锅触发时同步弹巨锅 overlay（仅 auto 触发路径才显示）──
+    // 玩家主动甩锅走 caught 动画 + 既有 umb 气泡，不需要巨锅 overlay；
+    // 3 秒不操作触发自动背锅时，需要更重的视觉强调 —— 巨锅甩脸 + 字幕带。
+    if (S.endingAutoBlame) {
+      showEndingBlameOverlay();
+      S.endingAutoBlame = false;     // 一次性标记
+    }
+    // ── 修复 1 end ────────────────────────────────────────────────────────
     S.log.push({
       t: S.t, scene: p.def.scene, pot: p.def.text, npc: "你自己", npcId: "self",
       argType: "背", reason: "（没有理由）", technique: "自己背",
@@ -1207,6 +1378,28 @@
       hideBubble();
       endGame("time", true);
     }, 2600);
+  }
+
+  /** 修复 1 · 巨锅甩脸 overlay ──────────────────────────────────
+   *  3 秒不操作触发自动背锅时显示：巨锅图占据屏幕中部 + 黄色字幕带。
+   *  主题切换时 img.data-asset 已被 applyThemeToDom 重写，无需再处理。
+   *  overlay 在 .show 期间挡住一切交互，避免玩家在动画中又去抓锅导致状态错位。
+   */
+  function showEndingBlameOverlay() {
+    var ov = $("ending-blame-overlay");
+    if (!ov) return;
+    // 切图 src（按主题）。先预加载新图，加载完才显示 ——
+    // 否则玩家看到的是「alt 文字占位」的尴尬瞬间。
+    var giantImg = ov.querySelector(".ending-blame-giant");
+    var url = asset("ending-blame-" + (isLight() ? "light" : "dark") + ".webp");
+    if (giantImg && giantImg.src !== location.origin + "/" + url) {
+      var pre = new Image();
+      pre.onload = function () { if (giantImg) giantImg.src = url; };
+      pre.src = url;
+    }
+    ov.classList.add("show");
+    // 2.4s 后移除（与 endingCarry 的 2.6s 节奏略早 0.2s，让卷宗淡入无感接续）
+    setTimeout(function () { ov.classList.remove("show"); }, 2400);
   }
 
   /** 结尾结算：画面下滑入卷宗，再自动滚到卷宗刚好展示完（底部留缝）；
@@ -1357,6 +1550,10 @@
     closePanel();
     hideBubble();
     $("stage").classList.remove("slowmo");
+
+    // 进卷宗时切到结尾音乐（act4_outro），避免崩溃/时间结束从高压幕音乐突兀跳到结算画面。
+    // playBgm(4) 有 curAct 幂等判断，已在第四幕时不会重复起播。
+    if (window.BFAudio) BFAudio.playBgm(4);
 
     if (reason === "breakdown") {
       toast(pick(COMMENTARY.breakdown), 4000);
@@ -1593,9 +1790,23 @@
   // 调试钩子（自动化自检用）：隐藏标签页 rAF 停摆时，幕切换/环阵只能经此同步驱动。
   window.__bf = {
     setAct: function (a) { if (S) S.act = a; },
+    forceAct: function (a) {     // 跳过 updateAct 的 S.t 重设，测试用
+      if (!S) return;
+      // 把 S.t 推进到对应幕区间，让 updateAct 的 S.t→act 映射与目标一致，
+      // 避免 loop 在下一帧把 act 又改回。
+      if (a === 1) S.t = 0;
+      else if (a === 2) S.t = 21;
+      else if (a === 3) S.t = 41;
+      else if (a === 4) S.t = 56;
+      S.act = a;
+      if (a === 3) enterClimax();
+      if (a === 4) enterEnding();
+    },
     enterClimax: enterClimax,
     enterEnding: enterEnding,
     spawnPot: spawnPot,
+    spawnDeferredPot: spawnDeferredPot,   // 测试入口：直接生成「来自过去的自己」锅
+    showEndingBlameOverlay: showEndingBlameOverlay,   // 测试入口：手动弹巨锅 overlay
     layoutRing: layoutRing,
     ringRadius: ringRadius,
     pots: function () {

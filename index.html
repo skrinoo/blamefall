@@ -10,6 +10,11 @@
 <link rel="preload" as="image" href="assets-light/actor/actor-idle.webp">
 <link rel="preload" as="image" href="assets-light/actor/actor-catch.webp">
 <link rel="preload" as="image" href="assets-light/bg/bg-stage.webp">
+  <!-- 修改 2 · 高潮幕平底锅图预载 -->
+  <link rel="preload" as="image" href="assets-light/pan/climax-pan-light-240.webp">
+  <!-- 修复 1 · 结尾巨锅甩脸图预载 -->
+  <link rel="preload" as="image" href="assets-light/ending/ending-blame-light.webp">
+  <link rel="preload" as="image" href="assets-light/ending/ending-blame-subtitle.webp">
 <!-- ── 14 个 NPC 头像预加载（标准 9 + 玄学 5）—— 全部都会进入环阵或底牌 ── -->
 <link rel="preload" as="image" href="assets-light/avatars/avh-didi.webp">
 <link rel="preload" as="image" href="assets-light/avatars/avh-roommate.webp">
@@ -118,7 +123,14 @@
 
     <div id="ending-note" hidden>没有其他人了</div>
 
-    <div id="fx"></div>
+    <!-- 修复 1 · 结尾超时自动背锅时的巨锅甩脸动画层（默认隐藏） -->
+    <div id="ending-blame-overlay" aria-hidden="true">
+      <img class="ending-blame-giant" data-asset="ending/ending-blame-light.webp"
+           src="assets-light/ending/ending-blame-light.webp" alt="巨锅甩脸" draggable="false">
+      <img class="ending-blame-sub" data-asset="ending/ending-blame-subtitle.webp"
+           src="assets-light/ending/ending-blame-subtitle.webp" alt="年轻人，是时候学会自己背锅了" draggable="false">
+    </div>
+
   </main>
 
   <footer id="npcbar"></footer>
@@ -297,6 +309,12 @@
     <button id="dev-end" class="btn btn-ghost btn-sm">立即结算</button>
   </div>
 </div>
+
+<!-- 特效层：body 直接子元素 + fixed 全视口。放在所有 section 之外，
+     不受 .screen 的 position:fixed / shake(transform) 影响，粒子永远用
+     视口坐标落位（fx.js 的 centre()/local() 拿 getBoundingClientRect 减
+     #fx 的 rect，body 层 fixed 时两者都是纯视口坐标）。 -->
+<div id="fx"></div>
 
 <script src="data/npcs.js"></script>
 <script src="data/pots.js"></script>
