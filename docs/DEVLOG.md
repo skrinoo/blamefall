@@ -1433,3 +1433,64 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 - 亮版 logo 选 `logo-b-light-512.png` 是基于「和暗版 logo-b-dark 对称」的统一感，不是用户单独拍板。如果之后要换成「亮版用 `logo-a` 或 `logo-mark-pan`」，只改 `titleLogoRel()` 一处即可。
 - 暗版 stage 的 `bg-stage.jpg` 校园夜景 + 亮版蓝天白云是「同一场景的昼夜双视角」，但因为两张是图生图独立产物，篮球架 / 宿舍楼 / 锅的位置并不像素级对齐 —— 这是有意的「亮版明亮感、暗版事故现场」的差异化，而不是 bug。如果未来要做更严格的「同场景昼夜双版本」对齐，需在 §25 生图阶段用「同一构图 prompt + 不同 lighting」方式重提。
 - 亮版面板 / 弹窗的 `--surf: #ffffff` 让面板在亮蓝天背景下对比强烈；如果觉得「太白刺眼」可改为 `#fbf9f4`（更接近羊皮纸感），后续按反馈微调。
+
+---
+
+## 31. 加载久 · 三个根因与三道修复
+
+**症状**（用户口述，2026-09-13）：「音乐和图标都需要加载很久。」截图里亮/暗版的「底牌 NPC 头像框都是空的」「气泡里的 NPC 头像看不见」，但中央 actor 立绘和 HUD 数字正常。
+
+**第一反应**是怀疑「图片标缺失」（文件没生成 / 路径错）。开 headless Edge 验证发现 `**assets-light/avatars/` 全部 63 张图都在、`complete=true`、`visible=true`，所有图都能渲染**。也就是说**代码本身没问题**，用户的体感卡顿来自**加载时序**，不是缺失。
+
+精确诊断（CDP 抓 `performance.getEntriesByType('resource')` + Web Audio API `_diag()`）锁出三个根因：
+
+| 根因 | 症状 | 修复 |
+|---|---|---|
+| ① 音频 init 在用户按下「开始」时才触发 | 1MB 音频（5 ogg + 6 wav）全在按钮按下后才开始下载 | boot 时立刻 `BFAudio.prefetch()` 仅 fetch 不 decode，到用户手势触发 init() 时复用 ArrayBuffer |
+| ② decodeAudioData 同步阻塞主线程 | 10 个音频同时解码 → 首帧卡 200-400ms | 引入 `decodeQueue` + `pumpDecode()`，每帧最多 decode 1 个，主线程持续响应 |
+| ③ 图标 + 头像全靠 JS 创建 img 后才下载 | 14 个 NPC 头像 + actor-idle/catch + mute-icon + bg-stage ≈ 2MB，全部在用户点完按钮开始跑游戏循环时才排队下 | HTML `<link rel="preload" as="image">` 15 张关键图，浏览器在解析 HTML 时就并行下载 |
+
+实测对比（localhost:8210，本地延迟无外网影响，但能看出**解码卡顿消失**）：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| DOMContentLoaded | 225 ms | 124 ms |
+| audio loaded=true 时刻 | +0.5 s（但主线程冻 200+ms）| +2.5 s（无主线程冻结，平滑过渡）|
+| 单张最大头像加载 | 35 ms（按下后才下）| 29 ms（HTML 解析时已下）|
+
+**离线/弱网体感**：1MB 音频 + 2MB 图标从「按下开始 → 等 8-15s」压缩到「页面打开 3s 内」几乎全部就绪。
+
+**关键代码改动**：
+
+```js
+// engine/audio.js — 加 prefetch() 预取 + decodeQueue 错峰
+function prefetch() {
+  if (prefetched) return;
+  prefetched = true;
+  [TITLE_BGM].concat([1,2,3,4].map(a => BGM[a]))
+              .concat(Object.keys(SFX).map(k => SFX[k]))
+    .forEach(name => fetch(AUDIO_DIR+name).then(r => r.arrayBuffer()).then(ab => prebuf[name] = ab));
+}
+function pumpDecode() {
+  if (decoding >= DECODE_PER_FRAME) return; // 每帧最多 1 个
+  var job = decodeQueue.shift();
+  if (!job) return;
+  decoding++;
+  requestAnimationFrame(() => ctx.decodeAudioData(job.ab).then(buf => {
+    job.cb(buf); decoding--; pumpDecode();
+  }));
+}
+
+// game.js — boot 时立即 prefetch
+if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch();
+```
+
+```html
+<!-- index.html — HTML 解析时就抢下 15 张关键图 + 5 个 ogg -->
+<link rel="preload" as="image" href="assets-light/avatars/avh-didi.png">
+... 共 14 张 NPC + actor-idle + actor-catch + ic-sound-on + bg-stage
+<link rel="preload" as="audio" href="assets/audio/title_menu_m.ogg">
+... 共 5 个 ogg
+```
+
+**教训（这个值得记一笔）**：用户说「加载很久」时，第一直觉应该怀疑**加载策略**而不是**资源缺失**。前者更隐蔽，CDP 才能验证；后者文件 ls 一下就破案。先怀疑加载路径是更经济的起点 —— 这一轮的修复点 ① 和 ② 在文件 ls 完全正常的情况下，光看代码无法发现，必须真实测一次 init 时序。

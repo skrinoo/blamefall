@@ -5,6 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>锅从天降 · BlameFall</title>
 <meta name="description" content="一款教你甩锅的爽游，和一堂教你接锅的课。">
+<!-- ── 关键资源预加载：把进游戏瞬间必看的几张图先拽下来，避免「点开始后等图出现」的体感卡顿 ── -->
+<link rel="preload" as="image" href="assets-light/icons/ic-sound-on.png">
+<link rel="preload" as="image" href="assets-light/actor/actor-idle.png">
+<link rel="preload" as="image" href="assets-light/actor/actor-catch.png">
+<link rel="preload" as="image" href="assets-light/bg/bg-stage.jpg">
+<!-- ── 14 个 NPC 头像预加载（标准 9 + 玄学 5）—— 全部都会进入环阵或底牌 ── -->
+<link rel="preload" as="image" href="assets-light/avatars/avh-didi.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-roommate.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-moyu.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-xuezhang.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-daoshi.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-jiaowu.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-fudaoyuan.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-shitang.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-suguan.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-ex.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-tianqi.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-shuini.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-xingzuo.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-future_self.png">
+<link rel="preload" as="image" href="assets-light/avatars/avh-past_self.png">
+<!-- ── 音频预取提示：告诉浏览器「这几首马上要播」，HTTP/2 push 友好网络会优先发 ── -->
+<link rel="preload" as="audio" href="assets/audio/title_menu_m.ogg">
+<link rel="preload" as="audio" href="assets/audio/act1_fun_m.ogg">
+<link rel="preload" as="audio" href="assets/audio/act2_tight_m.ogg">
+<link rel="preload" as="audio" href="assets/audio/act3_peak_m.ogg">
+<link rel="preload" as="audio" href="assets/audio/act4_outro_m.ogg">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="fx.css">
 </head>

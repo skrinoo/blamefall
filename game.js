@@ -1908,6 +1908,10 @@
     if (window.BFAudio) {
       // 先应用持久化的音量/静音设置（init 前设置好，init 时直接用）
       applyAudioSettings();
+      // boot 时立刻发起 fetch（不创建 AudioContext，浏览器允许），到用户首次手势时
+      // init() 会复用 cache 的 ArrayBuffer，跳过下载等待 —— 这是「点击开始按钮后等几秒才有
+      // 音乐」的根因之一：1MB 音频全在按钮按下后才开始下载。提前预取能抢 1-3 秒。
+      if (typeof BFAudio.prefetch === "function") BFAudio.prefetch();
       var bootAudio = function () {
         BFAudio.init();
         BFAudio.playTitle();

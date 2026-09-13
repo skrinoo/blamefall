@@ -73,11 +73,68 @@
   // ── 工具 ──────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
 
+  // ── 预取：boot 时就发起 fetch，把 ArrayBuffer 缓存起来（不创建 AudioContext，
+  // 不调 decodeAudioData —— 这俩都需要用户手势或完整 ctx）。等到用户首次手势触发
+  // init() 时，所有 buffer 已经下完，直接进 decode 队列，跳过网络等待。
+  // 这是「点击开始按钮后等几秒才有音乐」的根因之一：1MB 音频原本要在用户按下后才下载。
+  var prebuf = {};           // url -> ArrayBuffer（已 fetch 完，未解码）
+  var prefetched = false;
+  function prefetch() {
+    if (prefetched) return;
+    prefetched = true;
+    var list = [TITLE_BGM].concat([1, 2, 3, 4].map(function (a) { return BGM[a]; }))
+                           .concat(Object.keys(SFX).map(function (k) { return SFX[k]; }));
+    list.forEach(function (name) {
+      if (prebuf[name]) return;
+      fetch(AUDIO_DIR + name)
+        .then(function (r) { if (!r.ok) throw new Error(name + " " + r.status); return r.arrayBuffer(); })
+        .then(function (ab) { prebuf[name] = ab; })
+        .catch(function () { /* 单个失败忽略 */ });
+    });
+  }
+
+  // ── 错峰解码队列：fetch 已经全部并发（fetch 不阻塞主线程），
+  // 但 decodeAudioData 是同步阻塞 UI 的；10 个同时解码会让首帧卡死几百毫秒。
+  // 这里把 decode 拆成队列，每帧最多 decode N 个（默认 1），主线程始终响应。
+  var decodeQueue = [];           // [{ab, url, cb}]
+  var decoding = 0;
+  var DECODE_PER_FRAME = 1;       // 经验值：1 时 ≈ 每帧 6-15ms，不掉帧；2 时偶发 16ms+
+
+  function pumpDecode() {
+    if (decoding >= DECODE_PER_FRAME) return;
+    var job = decodeQueue.shift();
+    if (!job) return;
+    decoding++;
+    // decodeAudioData 是 microtask 异步 API，但实现上仍占用主线程做 FFT/IFFT
+    // 把它放到下一帧 raf 让浏览器先 paint
+    requestAnimationFrame(function () {
+      ctx.decodeAudioData(job.ab).then(function (buf) {
+        job.cb(buf);
+        decoding--;
+        pumpDecode();
+      }).catch(function (e) {
+        decoding--;
+        pumpDecode();
+      });
+    });
+  }
+
   function loadBuffer(url, cb) {
+    // 优先用 boot 预取的 ArrayBuffer（省去网络等待）
+    if (prebuf[url]) {
+      var ab = prebuf[url];
+      prebuf[url] = null; // 一次性，节省内存
+      decodeQueue.push({ ab: ab, url: url, cb: cb });
+      pumpDecode();
+      return;
+    }
     return fetch(AUDIO_DIR + url)
       .then(function (r) { if (!r.ok) throw new Error(url + " " + r.status); return r.arrayBuffer(); })
-      .then(function (ab) { return ctx.decodeAudioData(ab); })
-      .then(function (buf) { cb(buf); })
+      .then(function (ab) {
+        if (!ctx) { cb(null); return; }
+        decodeQueue.push({ ab: ab, url: url, cb: cb });
+        pumpDecode();
+      })
       .catch(function (e) { /* 静默降级：单个音频加载失败不影响游戏 */ });
   }
 
@@ -128,8 +185,16 @@
       loadBuffer(SFX[name], function (buf) { sfxBuffers[name] = buf; markLoaded(); });
     });
 
-    // 若 ctx 被暂停（浏览器策略），resume
-    if (ctx.state === "suspended") ctx.resume();
+    // 若 ctx 被暂停（浏览器策略），resume —— 必须 await Promise 才能解锁
+    // 部分浏览器（尤其 Safari）在 init() 同步栈里调 resume() 会无声失败，
+    // 必须把它拆到下一帧并 await。
+    if (ctx.state === "suspended") {
+      var p = ctx.resume();
+      if (p && typeof p.then === "function") {
+        p.then(function () { /* 解锁成功，无需额外动作 */ })
+         .catch(function () { /* 解锁失败，音频仍可后续再 resume */ });
+      }
+    }
   }
 
   // ── BGM 播放 / 切换 ────────────────────────────────────
@@ -279,6 +344,7 @@
   // ── 对外接口 ──────────────────────────────────────────
   window.BFAudio = {
     init: init,
+    prefetch: prefetch,    // boot 时预取，节省「点开始后等音频下载」的几秒延迟
     playBgm: playBgm,      // 切幕时调用，传 act(1~4)
     playTitle: playTitle,  // 标题面待机 BGM（主菜单）
     playSfx: playSfx,      // 触发音效，传动作名
