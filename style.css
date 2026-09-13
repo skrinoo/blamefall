@@ -20,7 +20,48 @@
   --crit:      #ffd166;
   --hold:      #7c8798;      /* 悬空：中性灰——既不好也不坏，所以不给它情绪色 */
 
+  /* 语义化表面色（卡片 / 面板 / 输入框等硬编码深底统一走这里，便于亮版替换） */
+  --surf:      #1a212d;      /* 面板 / 气泡主表面 */
+  --surf-2:    #12171f;      /* 面板渐变底部 */
+  --surf-edge: #333f52;      /* 面板描边 */
+  --field:     #0f141c;      /* 输入框 / 选项按钮底 */
+  --field-edge:#2f3a4c;      /* 输入框描边 */
+  --chrome:    rgba(19,24,34,.96);  /* HUD / NPC 栏底色 */
+  --chrome-2:  rgba(19,24,34,.72);
+  --veil:      rgba(4,6,10,.66);    /* 遮罩 */
+  --veil-2:    rgba(4,6,10,.72);
+  --box:       #0b0f16;      /* 弹窗盒子底 */
+
   --font: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", system-ui, -apple-system, sans-serif;
+}
+
+/* 光亮版（默认）：半写实明亮。html 默认 data-theme="light"，故本块即默认主题。 */
+html[data-theme="light"] {
+  --bg:        #f4f1ea;
+  --bg-2:      #ffffff;
+  --line:      #d9d4c9;
+  --ink:       #2a2e37;
+  --ink-dim:   #6b7280;
+  --ink-faint: #9aa0ac;
+
+  --pot:       #6b7280;
+  --good:      #e08c14;
+  --bad:       #d64545;
+  --shadow-c:  #7c5cbf;
+  --umbrella:  #2f8fc4;
+  --crit:      #d9a320;
+  --hold:      #8a93a3;
+
+  --surf:      #ffffff;
+  --surf-2:    #f6f3ec;
+  --surf-edge: #cfc9bc;
+  --field:     #ffffff;
+  --field-edge:#c4beb0;
+  --chrome:    rgba(255,255,255,.96);
+  --chrome-2:  rgba(255,255,255,.8);
+  --veil:      rgba(28,24,16,.34);
+  --veil-2:    rgba(28,24,16,.42);
+  --box:       #ffffff;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -64,6 +105,23 @@ kbd {
 }
 .screen.is-active { display: flex; }
 
+/* ── 屏幕背景（随主题切换的 bg-title/stage/report）─────────────────── */
+.screen {
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+/* 暗版背景较深、亮版背景较亮，文字可读性靠这一层轻遮罩兜底（不盖住背景主体） */
+.screen::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,.05) 40%, rgba(0,0,0,.22));
+}
+html[data-theme="light"] .screen::before {
+  background: linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.08) 45%, rgba(255,255,255,.28));
+}
+/* 背景之下的内容都抬到遮罩之上 */
+.screen > * { position: relative; z-index: 1; }
+
 /* ── 按钮 ───────────────────────────────────────────── */
 .btn {
   font-family: inherit; font-size: 14px; letter-spacing: .06em;
@@ -93,6 +151,7 @@ kbd {
   animation: potBob 3.2s ease-in-out infinite;
   filter: drop-shadow(0 12px 18px rgba(0,0,0,.6));
 }
+.title-pot img { display: block; width: 128px; height: 128px; margin: 0 auto; object-fit: contain; }
 @keyframes potBob {
   0%, 100% { transform: translateY(-6px) rotate(-3deg); }
   50%      { transform: translateY(6px)  rotate(3deg); }
@@ -101,7 +160,7 @@ kbd {
 .title-main {
   font-size: 62px; font-weight: 900; letter-spacing: .14em;
   margin: 10px 0 6px;
-  background: linear-gradient(180deg, #fff 10%, #9aa5b1 90%);
+  background: linear-gradient(180deg, var(--ink) 10%, var(--pot) 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .title-sub { color: var(--ink-dim); font-size: 15px; letter-spacing: .1em; }
@@ -134,7 +193,7 @@ kbd {
 .title-set label { color: var(--ink); font-weight: 600; }
 .title-set input[type="number"] {
   width: 64px; font-family: inherit; font-size: 13px; color: var(--ink);
-  background: #0f141c; border: 1px solid #2f3a4c; border-radius: 8px;
+  background: var(--field); border: 1px solid var(--field-edge); border-radius: 8px;
   padding: 6px 8px; outline: none; text-align: center;
 }
 .title-set input[type="number"]:focus { border-color: var(--crit); }
@@ -156,7 +215,7 @@ kbd {
 .title-ai {
   margin-top: 14px; padding: 12px 14px;
   border: 1px solid var(--line); border-radius: 12px;
-  background: rgba(15,20,28,.6);
+  background: var(--surf-2);
   display: flex; flex-direction: column; gap: 8px;
   width: min(460px, 100%);
 }
@@ -174,7 +233,7 @@ kbd {
 .ai-row { display: flex; gap: 8px; }
 .ai-row input {
   flex: 1; font-family: inherit; font-size: 12px; color: var(--ink);
-  background: #0f141c; border: 1px solid #2f3a4c; border-radius: 8px; padding: 8px 10px;
+  background: var(--field); border: 1px solid var(--field-edge); border-radius: 8px; padding: 8px 10px;
   outline: none; transition: border-color .18s;
 }
 .ai-row input:focus { border-color: var(--good); }
@@ -200,14 +259,14 @@ kbd {
 }
 .settings-modal {
   position: fixed; inset: 0; z-index: 60; padding: 18px;
-  background: rgba(4,6,10,.66); backdrop-filter: blur(3px);
+  background: var(--veil); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
 }
 .settings-modal[hidden] { display: none; }
 .settings-box {
   width: min(520px, 100%); max-height: min(82vh, 640px); overflow-y: auto;
   padding: 14px 16px 18px;
-  background: #0b0f16; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--box); border: 1px solid var(--line); border-radius: 14px;
   box-shadow: 0 18px 60px rgba(0,0,0,.55);
 }
 .settings-head { display: flex; justify-content: space-between; align-items: center; }
@@ -235,20 +294,20 @@ kbd {
 .pause-btn {
   position: absolute; top: 10px; right: 12px; z-index: 30;
   width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
-  background: rgba(15,20,28,.72); border: 1px solid var(--line);
+  background: var(--chrome); border: 1px solid var(--line);
   color: var(--ink-dim); font-size: 13px; line-height: 1;
   transition: color .15s, border-color .15s;
 }
 .pause-btn:hover { color: var(--crit); border-color: var(--crit); }
 .pause-overlay {
   position: fixed; inset: 0; z-index: 50;
-  background: rgba(4,6,10,.72); backdrop-filter: blur(4px);
+  background: var(--veil-2); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
 }
 .pause-overlay[hidden] { display: none; }
 .pause-box {
   padding: 28px 34px; text-align: center;
-  background: rgba(11,15,22,.92); border: 1px solid var(--line); border-radius: 16px;
+  background: var(--box); border: 1px solid var(--line); border-radius: 16px;
   box-shadow: 0 18px 60px rgba(0,0,0,.55);
 }
 .pause-title { margin: 0; font-size: 26px; letter-spacing: .2em; color: var(--ink); }
@@ -260,7 +319,7 @@ kbd {
   position: relative; z-index: 5;
   display: flex; align-items: center; gap: 18px;
   padding: 10px 18px;
-  background: linear-gradient(180deg, rgba(19,24,34,.96), rgba(19,24,34,.72));
+  background: linear-gradient(180deg, var(--chrome), var(--chrome-2));
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -317,8 +376,8 @@ kbd {
 .pot {
   position: absolute; width: 190px;
   padding: 9px 12px 10px;
-  background: linear-gradient(180deg, #2b3442, #1b222d);
-  border: 1px solid #3d4859; border-radius: 12px;
+  background: linear-gradient(180deg, var(--surf), var(--surf-2));
+  border: 1px solid var(--surf-edge); border-radius: 12px;
   box-shadow: 0 10px 26px -10px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.06);
   cursor: grab; z-index: 6;
   will-change: transform;
@@ -401,10 +460,16 @@ kbd {
   text-align: center; z-index: 8; cursor: pointer;
   transition: filter .2s, transform .2s;
 }
-#actor .actor-hands { font-size: 22px; opacity: 0; transform: translateY(6px); transition: .2s; }
-#actor .actor-body  { font-size: 46px; line-height: 1; filter: drop-shadow(0 6px 12px rgba(0,0,0,.7)); }
+/* 主角立绘：idle / catch 双姿态，.armed（接锅）时切到 catch */
+#actor .actor-img {
+  display: block; height: 150px; width: auto; margin: 0 auto;
+  filter: drop-shadow(0 6px 12px rgba(0,0,0,.7));
+  transition: opacity .2s;
+}
+#actor .actor-catch { display: none; }
+#actor.armed .actor-idle { display: none; }
+#actor.armed .actor-catch { display: block; }
 #actor .actor-name  { font-size: 10px; color: var(--ink-faint); letter-spacing: .3em; margin-top: 2px; }
-#actor.armed .actor-hands { opacity: 1; transform: translateY(0); }
 #actor.armed { filter: drop-shadow(0 0 14px rgba(78,168,222,.75)); }
 #actor.armed .actor-name { color: var(--umbrella); }
 #actor.hurt { animation: hurt .45s ease; }
@@ -426,7 +491,7 @@ kbd {
   position: relative; z-index: 10; flex: 0 0 auto;
   display: flex; gap: 7px; padding: 9px 12px 11px;
   overflow-x: auto; overflow-y: hidden;
-  background: linear-gradient(0deg, rgba(19,24,34,.98), rgba(19,24,34,.7));
+  background: linear-gradient(0deg, var(--chrome), var(--chrome-2));
   border-top: 1px solid var(--line);
   scrollbar-width: thin;
 }
@@ -441,6 +506,7 @@ kbd {
 }
 .npc:hover { transform: translateY(-3px); border-color: #404d61; }
 .npc-glyph { font-size: 23px; line-height: 1.15; }
+.npc-glyph img { display: block; width: 100%; height: 54px; object-fit: contain; margin: 0 auto; }
 .npc-name { font-size: 11px; margin-top: 3px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .npc-rel { height: 3px; margin-top: 5px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .npc-rel i { display: block; height: 100%; background: var(--umbrella); transition: width .35s, background .35s; }
@@ -464,7 +530,7 @@ kbd {
   content: "不搭"; position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
   font-size: 10px; color: var(--shadow-c); letter-spacing: .1em; white-space: nowrap; opacity: .85;
 }
-.npc.selected { border-color: var(--crit); background: #241f14; transform: translateY(-5px); }
+.npc.selected { border-color: var(--crit); background: var(--surf-2); transform: translateY(-5px); }
 .npc.coldwar { opacity: .38; filter: grayscale(1); cursor: not-allowed; }
 .npc.coldwar::before {
   content: "冷战"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -498,8 +564,8 @@ kbd {
      面板顶部会残留在 NPC 栏上（露出约 npcbar_h − 5%×panelH 像素的 head），
      甩锅后 closePanel() 一调用就变成一块挡头像的残影。补上 npcbar-h 才完全出屏。 */
   width: min(680px, 100%); transform: translate(-50%, calc(105% + var(--npcbar-h, 0px)));
-  background: linear-gradient(180deg, #1a212d, #12171f);
-  border: 1px solid #333f52; border-bottom: none;
+  background: linear-gradient(180deg, var(--surf), var(--surf-2));
+  border: 1px solid var(--surf-edge); border-bottom: none;
   border-radius: 16px 16px 0 0;
   padding: 14px 16px 16px;
   box-shadow: 0 -18px 48px -14px rgba(0,0,0,.95);
@@ -529,17 +595,18 @@ kbd {
   border: 1px solid var(--good); border-radius: 10px; background: rgba(240,165,44,.1);
 }
 .panel-target .t-glyph { font-size: 19px; }
+.panel-target .t-glyph img { display: block; width: 40px; height: 40px; object-fit: contain; margin: 0 auto; }
 .panel-target .t-name { font-size: 11px; color: var(--good); letter-spacing: .08em; }
 
 .panel-options { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .opt {
   display: flex; gap: 8px; align-items: flex-start; text-align: left;
   padding: 9px 11px; border-radius: 10px; cursor: pointer;
-  background: #1e2634; border: 1px solid #2f3a4c;
+  background: var(--field); border: 1px solid var(--field-edge);
   font-family: inherit; color: var(--ink);
   transition: transform .12s, border-color .16s, background .16s;
 }
-.opt:hover:not(.locked) { transform: translateY(-2px); border-color: var(--good); background: #26303f; }
+.opt:hover:not(.locked) { transform: translateY(-2px); border-color: var(--good); background: var(--surf-2); }
 .opt:active:not(.locked) { transform: translateY(0) scale(.985); }
 .opt-type { flex: 0 0 auto; font-size: 10px; letter-spacing: .06em; color: var(--ink-faint); padding-top: 2px; white-space: nowrap; }
 .opt-text { font-size: 12.5px; line-height: 1.5; }
@@ -550,7 +617,7 @@ kbd {
 .panel-free { display: flex; gap: 8px; margin-top: 9px; }
 #panel-input {
   flex: 1; font-family: inherit; font-size: 13px; color: var(--ink);
-  background: #0f141c; border: 1px solid #2f3a4c; border-radius: 10px; padding: 10px 12px;
+  background: var(--field); border: 1px solid var(--field-edge); border-radius: 10px; padding: 10px 12px;
   outline: none; transition: border-color .18s, box-shadow .18s;
 }
 #panel-input:focus { border-color: var(--crit); box-shadow: 0 0 0 3px rgba(255,209,102,.13); }
@@ -576,8 +643,8 @@ kbd {
   width: min(560px, calc(100% - 40px));
   transform: translate(-50%, -50%) scale(.9);
   padding: 20px 24px 18px; text-align: center;
-  background: linear-gradient(180deg, rgba(26,33,45,.98), rgba(16,21,29,.98));
-  border: 1px solid #3b4759; border-radius: 16px;
+  background: linear-gradient(180deg, var(--surf), var(--surf-2));
+  border: 1px solid var(--surf-edge); border-radius: 16px;
   box-shadow: 0 26px 70px -18px rgba(0,0,0,1);
   opacity: 0; pointer-events: none;
   transition: opacity .22s ease, transform .28s cubic-bezier(.2,1.4,.4,1);
@@ -625,7 +692,7 @@ kbd {
   transform: translateX(-50%) translateY(-14px);
   max-width: min(620px, calc(100% - 32px));
   padding: 8px 18px; border-radius: 999px;
-  background: rgba(12,15,20,.9); border: 1px solid var(--line);
+  background: var(--chrome); border: 1px solid var(--line);
   font-size: 13px; color: var(--ink-dim); letter-spacing: .04em;
   opacity: 0; pointer-events: none;
   transition: opacity .28s, transform .28s;
@@ -703,7 +770,7 @@ kbd {
 .stat-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .stat {
   flex: 1 1 120px; padding: 11px 12px; border-radius: 11px;
-  background: #171d28; border: 1px solid var(--line); text-align: center;
+  background: var(--field); border: 1px solid var(--line); text-align: center;
 }
 .stat b { display: block; font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .stat span { font-size: 10.5px; color: var(--ink-faint); letter-spacing: .1em; }
@@ -739,14 +806,14 @@ table.log .tech { color: var(--ink); }
 .devpanel {
   position: fixed; right: 12px; bottom: 12px; z-index: 90;
   width: min(430px, calc(100% - 24px));
-  background: rgba(9,12,17,.97); border: 1px solid #2c3644; border-radius: 12px;
+  background: var(--box); border: 1px solid var(--line); border-radius: 12px;
   display: none; flex-direction: column; overflow: hidden;
   box-shadow: 0 20px 50px -12px rgba(0,0,0,1);
 }
 .devpanel.open { display: flex; }
 .dev-head {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 7px 12px; background: #141a24; border-bottom: 1px solid #2c3644;
+  padding: 7px 12px; background: var(--surf-2); border-bottom: 1px solid var(--line);
   font-size: 11px; letter-spacing: .18em; color: var(--ink-faint);
 }
 .dev-close { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 13px; }

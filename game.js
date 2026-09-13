@@ -29,6 +29,71 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  /* ── 主题切换：默认光亮版 ───────────────────────────────
+     html[data-theme="light"] (默认) → assets-light/
+     html[data-theme="dark"]            → assets/
+     切换时 game.js 内部所有 asset() 输出随之改, DOM 上已存在的
+     <img> src 由 applyThemeToDom() 重写。
+  */
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") || "light";
+  }
+  function isLight() { return currentTheme() === "light"; }
+  function asset(rel) {
+    // rel 形如 "avatars/avh-daoshi.png" 或 "bg/bg-stage.jpg" 或 "ending-pan.png"
+    var base = isLight() ? "assets-light/" : "assets/";
+    return base + rel;
+  }
+  function setTheme(t) {
+    if (t !== "light" && t !== "dark") return;
+    document.documentElement.setAttribute("data-theme", t);
+    if (window.BFfx && typeof window.BFfx.setTheme === "function") {
+      window.BFfx.setTheme(t === "light" ? null : "dark");
+    }
+    applyThemeToDom();
+    syncThemeUI();
+  }
+  // 切换主题时遍历所有带 data-asset 的 <img> 重写 src
+  function applyThemeToDom() {
+    document.querySelectorAll("img[data-asset]").forEach(function (img) {
+      img.src = asset(img.getAttribute("data-asset"));
+    });
+    // 标题徽章文件名随主题变（logo-b-light / logo-b-dark），单独处理
+    var lg = document.getElementById("title-logo");
+    if (lg) lg.src = asset(titleLogoRel());
+    applyThemeBackgrounds();
+  }
+  // 背景是 CSS background-image，不随 <img> 遍历，需单独重写
+  function applyThemeBackgrounds() {
+    var map = {
+      "screen-title":  "bg/bg-title.jpg",
+      "screen-game":   "bg/bg-stage.jpg",
+      "screen-report": "bg/bg-report.jpg"
+    };
+    Object.keys(map).forEach(function (id) {
+      var s = $(id);
+      if (s) s.style.backgroundImage = "url(" + asset(map[id]) + ")";
+    });
+  }
+  // 创建带 data-asset 的 <img>：src 由 asset() 决定，切主题时被 applyThemeToDom 重写
+  function assetImg(rel, cls, alt) {
+    var img = document.createElement("img");
+    img.setAttribute("data-asset", rel);
+    img.src = asset(rel);
+    if (cls) img.className = cls;
+    img.alt = alt || "";
+    img.draggable = false;
+    return img;
+  }
+  // NPC 头像文件名：id 即 avh-<id>.png（宿管 suguan 单独映射，见 ROLE_IDS）
+  function avatarRel(id) {
+    return "avatars/avh-" + id + ".png";
+  }
+  // 标题徽章：六边徽章有 light/dark 两版文件名不同，按主题取
+  function titleLogoRel() {
+    return "logo/" + (isLight() ? "logo-b-light" : "logo-b-dark") + "-512.png";
+  }
+
   function el(tag, cls, html) {
     var d = document.createElement(tag);
     if (cls) d.className = cls;
@@ -172,6 +237,25 @@
     if (cb) cb.checked = castFilter;
   }
 
+  // ─────────────── 主题设置（localStorage 持久化，默认光亮版）───────────────
+  var THEME_KEY = "bf.theme";         // "light" / "dark"
+  function loadTheme() {
+    var t = "light";
+    try { t = localStorage.getItem(THEME_KEY) || "light"; } catch (e) { t = "light"; }
+    if (t !== "light" && t !== "dark") t = "light";
+    return t;
+  }
+  function saveTheme(t) {
+    if (t !== "light" && t !== "dark") return currentTheme();
+    try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* 隐私模式忽略 */ }
+    return t;
+  }
+  function syncThemeUI() {
+    var light = $("set-theme-light"), dark = $("set-theme-dark");
+    if (light) light.checked = isLight();
+    if (dark) dark.checked = !isLight();
+  }
+
   // ─────────────── 音量 / 静音设置（localStorage 持久化）───────────────
   var BGM_VOL_KEY = "bf.bgmVolume";   // 0~1
   var SFX_VOL_KEY = "bf.sfxVolume";   // 0~1
@@ -213,8 +297,7 @@
     if (svv) svv.textContent = Math.round(audioSfxVol * 100) + "%";
     var mb = $("btn-mute");
     var mi = $("mute-icon");
-    if (mb) mb.textContent = audioMuted ? " 已静音" : " 声音开";
-    if (mi) mi.src = audioMuted ? "assets/icons/ic-sound-off.png" : "assets/icons/ic-sound-on.png";
+    if (mi) mi.src = audioMuted ? asset("icons/ic-sound-off.png") : asset("icons/ic-sound-on.png");
     if (mb) mb.title = audioMuted ? "已静音 · 点击打开声音" : "声音开 · 点击静音";
   }
   function bindAudioControls() {
@@ -243,7 +326,7 @@
       chip.dataset.id = n.id;
       chip.dataset.idx = String(i);
       chip.innerHTML =
-        '<div class="npc-glyph">' + n.glyph + '</div>' +
+        '<div class="npc-glyph"><img data-asset="' + avatarRel(n.id) + '" src="' + asset(avatarRel(n.id)) + '" alt="' + n.name + '" draggable="false"></div>' +
         '<div class="npc-name">' + n.name + '</div>' +
         '<div class="npc-rel"><i style="width:100%"></i></div>' +
         '<div class="npc-fatigue">0</div>';
@@ -554,7 +637,7 @@
 
     $("panel-pot-text").textContent = p.def.text;
     $("panel-target").innerHTML =
-      '<div class="t-glyph">' + n.glyph + '</div><div class="t-name">' + n.name + '</div>';
+      '<div class="t-glyph"><img data-asset="' + avatarRel(n.id) + '" src="' + asset(avatarRel(n.id)) + '" alt="' + n.name + '" draggable="false"></div><div class="t-name">' + n.name + '</div>';
 
     var box = $("panel-options");
     box.innerHTML = "";
@@ -1057,7 +1140,7 @@
     $("ending-note").hidden = false;
     // 预加载结尾平底锅图：spawnEndingPot 在 1200ms 后才起，先预载避免弱网空帧
     var pre = new Image();
-    pre.src = "assets/ending-pan.png";
+    pre.src = asset("ending-pan.png");
     // 高潮残留锅清场：淡出移除，结尾幕不砸锅扣血
     S.pots.slice().forEach(function (p) {
       if (p.state !== "falling") return;
@@ -1527,7 +1610,9 @@
     state: function () {
       return S ? { act: S.act, t: +S.t.toFixed(2), over: S.over, paused: S.paused,
                    held: !!S.held, endPotDone: S.endPotDone, phase: S.phase } : null;
-    }
+    },
+    setTheme: setTheme,
+    theme: currentTheme
   };
   function bind() {
     $("btn-start").addEventListener("click", startGame);
@@ -1551,6 +1636,8 @@
       if (S && S.held) { if (castFilter) applyCastFilter(S.held.def); else clearTargetable(); }
       devLog("场景契合软过滤 " + (castFilter ? "开" : "关"), "dim");
     });
+    $("set-theme-light").addEventListener("change", function () { if (this.checked) { saveTheme("light"); setTheme("light"); } });
+    $("set-theme-dark").addEventListener("change", function () { if (this.checked) { saveTheme("dark"); setTheme("dark"); } });
 
     $("panel-close").addEventListener("click", releasePot);
     $("panel-send").addEventListener("click", function () { throwFree($("panel-input").value); });
@@ -1808,6 +1895,8 @@
   function boot() {
     S = freshState();
     bind();
+    // 主题：localStorage 读上次选择，默认光亮版；先把 data-theme 设好再应用背景/头像
+    setTheme(loadTheme());
     loadFreeTimer(); syncFreeTimerUI();
     loadCastFilter(); syncCastFilterUI();
     loadAudioSettings(); syncAudioUI(); bindAudioControls();

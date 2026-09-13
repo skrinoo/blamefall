@@ -1371,3 +1371,65 @@ genpot（真实网关 ~3s/次）。快甩 3 口就见底，回填还在路上 �
 
 **改动清单**：`engine/audio.js`（分轨音量 + relTitle/relAct1/relClick + 暂停压音 + 标题优先加载）；`game.js`（音量设置持久化 + 静音/滑块绑定 + setPaused 压音）；`index.html`（+静音按钮 + 声音 section）；`style.css`（+.title-actions + range 样式）。纯客户端改动，服务端零变更。
 
+---
+
+## 30. 半写实明亮风格正式接入 + 双主题切换映射（2026-09-13）
+
+**需求**（用户，原话）：「将这些完成后接入游戏本体，主题切换映射（默认为光亮版），写 DEVLOG §29」（注：版本号后调到 §30，因为 §29 已被前一轮「音量控制层」占用）。
+
+合并：**① 把 §25–§28 准备好的全部视觉资产正式接入游戏本体（标题屏 / 舞台 / 卷宗 / 主角 / NPC 头像 / 静音按钮 / 结尾锅） ② 实现 `<html data-theme>` 切换映射（默认光亮版），所有图资源随主题切到 `assets-light/` 或 `assets/` ③ 把 §28 的特效层接入 (`fx.css` + `fx.js`) ④ 标题屏 logo 用光亮版六边徽章**。
+
+**关键约束 / 根因（3 条）**：
+
+1. **`<html data-theme="dark">` 时 `var(--chrome)` 未定义 → NPC 栏 / HUD 底色 fallback 失效**。最初我把 `html[data-theme="light"]` 当默认主题叠在 `:root`（暗版）之上。结果切到暗版时 `--chrome` / `--surf` / `--surf-edge` / `--box` 这一组只在亮版定义的语义化表面色全为 `unset`，HUD / NPC 栏 / 面板的 `background: var(--chrome)` 直接无背景 —— 看起来是「透明」但实际是被底层亮版默认值波及（CSS 变量 fallback 在 `:root` 未定义时是空，浏览器用 initial value）。**修复**：所有亮版独有变量都补到 `:root`（暗版）一组默认值，再让 `html[data-theme="light"]` 覆写亮版值。变量总有定义，切主题不会出现「某变量没值」的中间态。
+2. **`fx.js` 的 `theme()` 默认值是 `"dark"`**（缺省走暗版），与新的「默认光亮版」冲突。`setTheme("light")` 时正确置 `CFG.theme = null` 让它跟随 `data-theme`，但游戏本体里忘了调 `BFfx.setTheme(...)`。**修复**：`game.js#setTheme()` 在切换时同步调 `window.BFfx.setTheme(t === "light" ? null : "dark")`，特效粒子立刻随主题切到对应调色板（亮版的桃粉 / 珊瑚 / 湖蓝 / 柠檬黄）。
+3. **结尾平底锅只有 `assets/ending-pan.png`，亮版没有对应图**。用户拍板「结尾平底锅 = 旧版像素风，不替换」（§28 决策 #3），所以亮版也直接复用这张同款（不重新生成）。**修复**：`Copy-Item assets/ending-pan.png → assets-light/ending-pan.png`，让 `asset("ending-pan.png")` 在双主题都解析到同一份文件；`game.js` 的两处硬编码 `pre.src = asset(...)` 和 `'<img ... src="' + asset(...) + '" ...>'` 全部走主题映射，不再写死 `assets/`。
+
+**修复 / 实现**：
+
+- **`index.html`**：
+  - `<html lang="zh-CN" data-theme="light">`：默认光亮版。
+  - 引入 `<link rel="stylesheet" href="fx.css">` 和 `<script src="fx.js"></script>`（在 `game.js` 之前）。
+  - `#mute-icon` 加 `data-asset="icons/ic-sound-on.png"`，初始 src 改 `assets-light/icons/ic-sound-on.png`。
+  - `#actor` 去掉 emoji 的 `.actor-hands` / `.actor-body`，换成两个 `<img class="actor-img actor-idle | actor-catch" data-asset="actor/actor-{idle,catch}.png">`，CSS 用 `.armed` 类控制切换。
+  - `.title-pot` 的 🍲 换成 `<img id="title-logo">`（走 `titleLogoRel()`，文件名随主题选 `logo-b-light` / `logo-b-dark`）。
+  - 设置弹窗新增「主题」section：两个 radio `#set-theme-light` / `#set-theme-dark`，默认 `light` checked。
+- **`game.js`**：
+  - 顶部主题模块（已在前一轮占位）：`currentTheme()` / `isLight()` / `asset(rel)` / `setTheme(t)` / `applyThemeToDom()` + 新增 `applyThemeBackgrounds()`（背景是 CSS background-image，不能被 `<img>` 遍历捕获，单独重写三个 screen 的 `background-image`）+ `assetImg()`（创建带 `data-asset` 的 img）+ `avatarRel(id)` / `titleLogoRel()` 路径 helper。
+  - `applyThemeToDom()` 现在遍历三件事：`img[data-asset]` 重写 src + `#title-logo` 重写 src（文件名不同）+ `applyThemeBackgrounds()`。
+  - `buildNpcBar()` 里 NPC chip 的 `.npc-glyph` 改成 `<img data-asset="avatars/avh-<id>.png">`，15 个 NPC 全部走 `asset(avatarRel(n.id))`。
+  - 面板目标 `.t-glyph` 同样换成 `<img data-asset="avatars/avh-<id>.png">`（不再是 emoji）。
+  - `pre.src = asset("ending-pan.png")` 和结尾锅 `<img class="pot-pan" src="' + asset(...) + '">`：两处硬编码全部走主题映射。
+  - `boot()` 第一个动作：`setTheme(loadTheme())` —— 从 `localStorage.bf.theme` 读上次选择（默认 `"light"`），设 `data-theme` + 同步 `BFfx.setTheme` + 重写所有 `data-asset` src + 设置背景图 + sync UI。
+  - 主题设置：`loadTheme()` / `saveTheme(t)` / `syncThemeUI()`（radio checked 同步），`setTheme` 末尾调 `syncThemeUI()`。
+  - `bind()` 里给两个 radio 加 change 监听，触发 `saveTheme` + `setTheme`。
+  - `window.__bf.setTheme` / `__bf.theme`：暴露给无头验收脚本做端到端测试。
+- **`style.css`**：
+  - **约定：`:root` = 暗版默认色（与 `fx.css` 保持一致，避免两文件主题约定冲突），`html[data-theme="light"]` = 亮版覆盖**。`<html>` 默认 `data-theme="light"`，亮版即默认。
+  - 把 11 处硬编码深底色（`.pot` 渐变 / `.panel` 渐变 / `.bubble` 渐变 / `.settings-box` / `.pause-box` / `.pause-overlay` / `.pause-btn` / `.toast` / HUD / NPC 栏 / `.devpanel` / `.dev-head` / `.opt` / `#panel-input` / `.ai-row input` / `.title-set input[type=number]` / `.title-ai` / `.stat` / `.npc.selected` / `.title-main` gradient）替换为语义化变量 `--surf` / `--surf-2` / `--surf-edge` / `--field` / `--field-edge` / `--chrome` / `--chrome-2` / `--veil` / `--veil-2` / `--box`，亮版块覆写这组变量为白底 / 浅米底 / 浅边。
+  - `.screen { background-position: center; background-size: cover; background-repeat: no-repeat; }`：屏背景用 `cover` 居中铺。`.screen::before` 加一层微透遮罩（暗版叠 28%/22% 黑，亮版叠 34%/28% 白）保文字可读，不盖住背景主体；`.screen > * { position: relative; z-index: 1 }` 把屏内组件抬到遮罩之上。
+  - 新增 `.npc-glyph img`（74×54 object-fit contain）、`.panel-target .t-glyph img`（40×40）、`.title-pot img`（128×128）、`.actor-img`（高 150px）的尺寸规则。
+  - 主角立绘用 `.actor-idle` / `.actor-catch` 双 img，`.armed` 切换 `display`（idle 默认显，armed 时切到 catch，与原 emoji `.actor-hands` 触发时机一致）。
+
+**验证**（CDP 无头 Edge，`C:\Users\skrin\.workbuddy\bf\accept_theme.js`）：
+
+- 默认光亮版：`{theme: "light", titleLogo: "assets-light/logo/logo-b-light-512.png", actorIdle: "assets-light/actor/actor-idle.png", actorCatch: "assets-light/actor/actor-catch.png", muteIcon: "assets-light/icons/ic-sound-on.png", imgs: 4, broken: []}`。屏背景 `bg/bg-title.jpg` / `bg/bg-stage.jpg` / `bg/bg-report.jpg` 全部 `assets-light/` 前缀。
+- 进游戏后 NPC 栏：`npcImg = "assets-light/avatars/avh-didi.png"`（15 NPC 全部 `avh-<id>.png`），`broken: []`。
+- `__bf.setTheme('dark')` 后：`{theme: "dark", titleLogo: "assets/logo/logo-b-dark-512.png", npcImg: "assets/avatars/avh-didi.png", actorSrc: "assets/actor/actor-idle.png"}` —— **全部 base 从 `assets-light/` 翻成 `assets/`**，且 `broken: []`。
+- `__bf.setTheme('light')` 后回到亮版，资源全部翻回。
+- 控制台错误：仅 11 条**音频 CORS** 报错（`Access to fetch at 'file:///...' from origin 'null' has been blocked by CORS policy`），这是 `engine/audio.js` 在 `file://` 协议下的**已有行为**（与本次主题切换无关），图像层零错误。
+- 截图三张：标题屏（米黄羊皮纸 + 浅蓝底 + 六边徽章光版）/ 舞台亮版（蓝天 + 黑锅 + 篮球架 + 红砖宿舍楼 + 15 NPC 头像 + 主角立绘）/ 舞台暗版（暗夜校园 + 暗版主角 + 15 暗版头像）。亮版的「轻松明快搞笑」氛围与暗版「事故现场」氛围并存可切。
+
+**改动清单**：
+- `index.html`：`data-theme="light"`、引入 fx.css / fx.js、#mute-icon 加 data-asset、`#actor` 换两张 img、`.title-pot` 换 title-logo img、设置弹窗新增主题 section。
+- `game.js`：主题模块扩展（`applyThemeBackgrounds` / `assetImg` / `avatarRel` / `titleLogoRel`）；NPC 栏与面板目标接入 `avh-<id>.png`；结尾锅两处走 `asset()`；`boot()` 先 `setTheme(loadTheme())`；`loadTheme` / `saveTheme` / `syncThemeUI` 持久化；radio 绑定；`__bf.setTheme` 暴露。
+- `style.css`：`:root` 补全暗版语义化表面色变量；`html[data-theme="light"]` 覆写亮版；11 处硬编码深底替换为变量；屏背景 cover + 微透遮罩 + 子元素 z-index 抬起；新资源尺寸规则（`npc-glyph img` / `panel-target .t-glyph img` / `title-pot img` / `actor-img`）。
+- `assets-light/ending-pan.png`：从 `assets/ending-pan.png` 复制（结尾锅像素版双主题共用，不重新生图）。
+- 新增脚本：`C:\Users\skrin\.workbuddy\bf\accept_theme.js`（主题切换端到端验收）；`verify\game-{title,stage}-{light,dark}.png` 截图。
+
+**工具链备注**：`accept_theme.js` 复用 `browser.js`（独立 profile + CDP 9333），覆盖：默认主题 / 进游戏后 NPC 头像 / 切暗版翻 base / 切回亮版翻回 / 零 broken / 仅音频 CORS 报错（预期内）。这条验收脚本后续加新视觉资源时直接复用同一模板（往 `snap()` 里加 `getAttribute('src')` 字段即可）。
+
+**已知局限**（不阻塞，记录留底）：
+- 亮版 logo 选 `logo-b-light-512.png` 是基于「和暗版 logo-b-dark 对称」的统一感，不是用户单独拍板。如果之后要换成「亮版用 `logo-a` 或 `logo-mark-pan`」，只改 `titleLogoRel()` 一处即可。
+- 暗版 stage 的 `bg-stage.jpg` 校园夜景 + 亮版蓝天白云是「同一场景的昼夜双视角」，但因为两张是图生图独立产物，篮球架 / 宿舍楼 / 锅的位置并不像素级对齐 —— 这是有意的「亮版明亮感、暗版事故现场」的差异化，而不是 bug。如果未来要做更严格的「同场景昼夜双版本」对齐，需在 §25 生图阶段用「同一构图 prompt + 不同 lighting」方式重提。
+- 亮版面板 / 弹窗的 `--surf: #ffffff` 让面板在亮蓝天背景下对比强烈；如果觉得「太白刺眼」可改为 `#fbf9f4`（更接近羊皮纸感），后续按反馈微调。

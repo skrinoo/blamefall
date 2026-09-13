@@ -1,18 +1,21 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>锅从天降 · BlameFall</title>
 <meta name="description" content="一款教你甩锅的爽游，和一堂教你接锅的课。">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="fx.css">
 </head>
 <body>
 
 <!-- ══════════════════════ 标题屏 ══════════════════════ -->
 <section id="screen-title" class="screen is-active">
   <div class="title-wrap">
-    <div class="title-pot" aria-hidden="true">🍲</div>
+    <div class="title-pot" aria-hidden="true">
+      <img id="title-logo" data-asset-logo="1" src="assets-light/logo/logo-b-light-512.png" alt="">
+    </div>
     <h1 class="title-main">锅从天降</h1>
     <p class="title-sub">一款教你甩锅的爽游，和一堂教你接锅的课</p>
 
@@ -25,7 +28,7 @@
 
     <div class="title-actions">
       <button id="btn-mute" class="btn btn-ghost btn-sm title-mute" type="button" title="声音开/关">
-        <img id="mute-icon" src="assets/icons/ic-sound-on.png" alt="声音">
+        <img id="mute-icon" data-asset="icons/ic-sound-on.png" src="assets-light/icons/ic-sound-on.png" alt="声音">
       </button>
       <button id="btn-settings" class="btn btn-ghost btn-sm" type="button">⚙ 设置</button>
     </div>
@@ -81,8 +84,8 @@
     <div id="ring"></div>
 
     <div id="actor" title="点自己＝接锅">
-      <div class="actor-hands">🙌</div>
-      <div class="actor-body">🧍</div>
+      <img class="actor-img actor-idle" data-asset="actor/actor-idle.png" src="assets-light/actor/actor-idle.png" alt="你">
+      <img class="actor-img actor-catch" data-asset="actor/actor-catch.png" src="assets-light/actor/actor-catch.png" alt="你接锅">
       <div class="actor-name">你</div>
     </div>
 
@@ -205,6 +208,18 @@
         <p class="settings-hint">暂停时背景音乐会自动降低，恢复后还原。</p>
       </section>
       <section class="settings-sec">
+        <h3 class="settings-sec-title">主题</h3>
+        <label class="settings-row">
+          <input id="set-theme-light" type="radio" name="theme" value="light" checked>
+          <span>光亮版（默认）</span>
+        </label>
+        <label class="settings-row">
+          <input id="set-theme-dark" type="radio" name="theme" value="dark">
+          <span>暗版</span>
+        </label>
+        <p class="settings-hint">切换即时生效：背景 / 头像 / 图标 / logo / 特效全部随主题切换。</p>
+      </section>
+      <section class="settings-sec">
         <h3 class="settings-sec-title">AI</h3>
         <!-- AI 凭据：首次打开提示填自己的 Key（token 记自己账），填过就不再打扰 -->
         <div class="title-ai" id="ai-set">
@@ -266,6 +281,7 @@
 <script src="engine/api.js"></script>
 <script src="engine/potgen.js"></script>
 <script src="engine/audio.js"></script>
+<script src="fx.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
