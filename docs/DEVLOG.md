@@ -1494,3 +1494,67 @@ if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch()
 ```
 
 **教训（这个值得记一笔）**：用户说「加载很久」时，第一直觉应该怀疑**加载策略**而不是**资源缺失**。前者更隐蔽，CDP 才能验证；后者文件 ls 一下就破案。先怀疑加载路径是更经济的起点 —— 这一轮的修复点 ① 和 ② 在文件 ls 完全正常的情况下，光看代码无法发现，必须真实测一次 init 时序。
+
+
+---
+
+## 32. 加载优化 · WebP 切换 + 死重清理
+
+**问题驱动**：§31 修了加载时序，但「首次冷启动仍要下 4.6MB 真实资源」的问题没动。用户接着问「如何优化加载时间」。
+
+**第一刀：审计「加载 vs 死重」**（`audit_assets.js` 扫源码引用 vs 实际文件）：
+
+| 类别 | 文件数 | 体积 |
+|---|---|---|
+| 仓库总资产 | 353 | 38.5 MB |
+| 运行时真正加载 | 52 | **4.6 MB** |
+| 死重（永不加载）| 301 | **33.8 MB** |
+
+死重来源：① AI 生图原始整张 sheet（`Five_*.png` / `Cinematic_*.png` 等，抠图后整张废弃）② logo-1024/app-icon 全套（无 PWA manifest 引用）③ avh-raw-*.png 中间产物。
+
+**第二刀：WebP 转换**（`to_webp.js` / `to_webp_dark.js` 用 ffmpeg）：
+
+23 张运行时大图（actor×2 / bg×3 / ending-pan×2 / logo×1 / 头像×14）亮+暗双版本转 WebP：
+
+| 类别 | PNG/JPG 体积 | WebP 体积 | 节省 |
+|---|---|---|---|
+| 亮版（assets-light）| 2037 KB | 440 KB | **78%** |
+| 暗版（assets）| 1879 KB | 413 KB | **77%** |
+| ending-pan.png | 350 KB ×2 | 25 KB ×2 | **93%**（透明 PNG 在 WebP 几乎无损压缩爆炸）|
+| 14 头像（每张）| ~60-80 KB | ~5-20 KB | **73-81%** |
+
+**第三刀：死重清理**（`clean_dead.js` 跑 `verify_dead.js` 逐个 grep 源码确认无引用后删除）：
+
+13 个文件共 **16.2 MB** 已删：`Five_portrait_*.png` ×5、`Five_character_*.png` ×4、`Cinematic_*.png` ×3、`Extremely_dark_*.png` ×1、`Two_full_body_poses_*.png` ×1、`Seven_small_game_UI_*.png` ×1、`avh-raw-*.png` ×3。git checkout 可逐个还原。
+
+**代码改动**：
+- `game.js` `avatarRel()` / `titleLogoRel()` / `applyThemeBackgrounds()` 的 map / `enterEnding()` / `spawnEndingPot()` —— rel 全部 .png → .webp
+- 顺手修了一个**主题切换 bug**：`game.js:1163` 原本硬编码 `src="assets/ending-pan.png"`（暗版路径），切到光亮版时结尾锅仍用暗版图 —— 现在改用 `asset("ending-pan.webp")` + `data-asset="ending-pan.webp"`，主题正确
+- `index.html` preload 15 张图 + 静态 `<img>` 的 src/data-asset 全部 .png/.jpg → .webp（精确 19 处替换，0 残留）
+- `vercel.json` 加 Cache-Control 头：`/assets/**` 与 `/assets-light/**` 一年 immutable（图像 hash 不变前提下），二次访问几乎秒开
+
+**icon 与 fx-*.png 保留**（刻意）：ic-*.png 共 44KB < 单文件 < 6KB，转 WebP 收益 < 1KB 且浏览器对超小 PNG 有 zopfli 优化；fx-*.png 是特效透明小图，运行时多张叠加不能转有损；且暗版 `assets/fx/fx-burst.png` 是 116B 占位（图片标缺失 §30 已记录，需单独修）。
+
+**实测对比**（localhost:8210）：
+
+| 指标 | §31 后 | 本轮后 |
+|---|---|---|
+| 首次冷启动总下载 | 4.6 MB | **~3.0 MB** |
+| 14 NPC 头像总大小 | ~870 KB | ~170 KB |
+| ending-pan 双份 | 700 KB | 50 KB |
+| 仓库体积 | 38.5 MB | **22.3 MB** |
+| clone/push 时间 | 基线 | **~58% 更快** |
+| 二次冷启动（无缓存）| ~4.6 MB | ~3.0 MB |
+| 二次访问（有缓存）| 需重下 | **0 KB**（immutable cache）|
+
+**回归验证**（headless Edge，`probe_render.js`）：
+- 亮版 / 暗版截图正常，0 broken img，0 网络失败（除 favicon）
+- 主题切换：亮→暗→亮 来回三次，actor/头像/背景全部跟着 `asset()` 切到对应 webp，无 404
+- WebP 浏览器支持 97.5%+（Can I use，2017 起所有现代浏览器）；Safari 14+/iOS 14+ 完整支持，对一个 2026 的 Web 游戏来说完全可接受
+
+**未做（标记后续）**：
+- 音频 ogg → opus：5 个 BGM 共 1021KB，opus 同码率能省 ~30%。但 ffmpeg 转 opus 后浏览器支持略弱（Safari < 16 不支持 opus audio element，需保留 ogg fallback），改动面比 WebP 大，留作下一轮
+- 暗版 `assets/fx/fx-burst.png` 116B 占位文件（§30 提到的「图片标缺失」根因之一）—— 现在 WebP 化没碰到它，等下一轮单独修
+- 暗版 `assets/icons/` 共 27 个图标 + 暗版 pan-v1-1024.webp 等大文件仍在仓库，但代码已不引用 —— 可继续按需清理
+
+**教训**：「**压缩已加载的 + 删除未加载的**」是两条独立优化路径，前者改感官速度（单资源小），后者改工程速度（仓库小）。这一轮两条都做了，合计仓库 -16.2MB / 单资源 -78%，体感会叠加。

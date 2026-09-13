@@ -40,7 +40,7 @@
   }
   function isLight() { return currentTheme() === "light"; }
   function asset(rel) {
-    // rel 形如 "avatars/avh-daoshi.png" 或 "bg/bg-stage.jpg" 或 "ending-pan.png"
+    // rel 形如 "avatars/avh-daoshi.webp" 或 "bg/bg-stage.webp" 或 "ending-pan.webp"
     var base = isLight() ? "assets-light/" : "assets/";
     return base + rel;
   }
@@ -66,9 +66,9 @@
   // 背景是 CSS background-image，不随 <img> 遍历，需单独重写
   function applyThemeBackgrounds() {
     var map = {
-      "screen-title":  "bg/bg-title.jpg",
-      "screen-game":   "bg/bg-stage.jpg",
-      "screen-report": "bg/bg-report.jpg"
+      "screen-title":  "bg/bg-title.webp",
+      "screen-game":   "bg/bg-stage.webp",
+      "screen-report": "bg/bg-report.webp"
     };
     Object.keys(map).forEach(function (id) {
       var s = $(id);
@@ -85,13 +85,13 @@
     img.draggable = false;
     return img;
   }
-  // NPC 头像文件名：id 即 avh-<id>.png（宿管 suguan 单独映射，见 ROLE_IDS）
+  // NPC 头像文件名：id 即 avh-<id>.webp（宿管 suguan 单独映射，见 ROLE_IDS）
   function avatarRel(id) {
-    return "avatars/avh-" + id + ".png";
+    return "avatars/avh-" + id + ".webp";
   }
   // 标题徽章：六边徽章有 light/dark 两版文件名不同，按主题取
   function titleLogoRel() {
-    return "logo/" + (isLight() ? "logo-b-light" : "logo-b-dark") + "-512.png";
+    return "logo/" + (isLight() ? "logo-b-light" : "logo-b-dark") + "-512.webp";
   }
 
   function el(tag, cls, html) {
@@ -1140,7 +1140,7 @@
     $("ending-note").hidden = false;
     // 预加载结尾平底锅图：spawnEndingPot 在 1200ms 后才起，先预载避免弱网空帧
     var pre = new Image();
-    pre.src = asset("ending-pan.png");
+    pre.src = asset("ending-pan.webp");
     // 高潮残留锅清场：淡出移除，结尾幕不砸锅扣血
     S.pots.slice().forEach(function (p) {
       if (p.state !== "falling") return;
@@ -1160,7 +1160,7 @@
     // 最后一锅不再是文字卡片：换成像素风平底锅图像（透明背景）。
     // width/height 属性锁住布局尺寸，下面悬停位计算能同步读到 offsetHeight，不等图加载
     p.el.innerHTML =
-      '<img class="pot-pan" src="assets/ending-pan.png" width="240" height="240" alt="" draggable="false">' +
+      '<img class="pot-pan" data-asset="ending-pan.webp" src="' + asset("ending-pan.webp") + '" width="240" height="240" alt="" draggable="false">' +
       '<div class="pot-hold"><i></i></div>';
     // 先上类再读 offsetHeight：基础卡片样式（宽190+内边距）会把布局高读成 ≈265，悬停位会偏高
     p.el.classList.add("ending-pot");    // CSS：去卡片外壳 + 紫光随锅轮廓（最后一口锅的仪式感）
