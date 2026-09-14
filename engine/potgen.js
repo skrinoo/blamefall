@@ -5,15 +5,19 @@
  * 这样「AI 实时生成理由/锅」就不违反「AI 不在热路径」的铁律 —— 生成在后台，
  * 玩家在锅落地的瞬间从不等待网络。
  *
- * 热 / 冷切换 = 是否接入 key（复用 JudgeAPI.isOnline()）：
- *   在线（http(s) 同源，部署态有网关）→ 热路径：spawnPot 优先取 AI 生成的锅
- *   离线（file:// 直开，无 apiBase）  → 冷路径：enabled()=false，全用静态锅池
+ * 热 / 冷切换 = 是否接入了可用的 AI 通路（复用 JudgeAPI.isOnline()）。两条通路：
+ *   通道 A 浏览器直连 —— 玩家认领到了自己的上游 base（directBase）。请求从玩家
+ *                       自己的机器发出，**静态宿主（GitHub Pages）与纯前端部署同样可用**。
+ *   通道 B 同源代理   —— 本部署有 /api/genpot（服务端 env 决定上游）。
+ *   都没有（file:// 直开且没填 key / 没认领）→ 冷路径：enabled()=false，全用静态锅池。
  * 端点不可用 / 返回坏批 / 超时 → 缓冲不增，next() 返回 null，
  * 调用方（game.js choosePotDef）自动落回静态锅池。玩家侧永远无感。
  *
  * 校验与 api/genpot.mjs 同源：五类型缺一不可、targetRole 归一到四类、
  * ownershipOverride 逐键夹 [0,1]、绝不接受任何数值型说服度字段（模型给了也没有
  * 入口写进来 —— sanitize 只挑白名单字段）。
+ * 注：通道 A 拿到的原始数组也**走同一个 sanitize** —— 校验只在一个地方发生，
+ * 不因为换了通道就多修一份逻辑（那正是「两处真相」的开始）。
  */
 (function (root, factory) {
   var api = factory();
@@ -42,6 +46,18 @@
 
   function online() {
     return typeof JudgeAPI !== "undefined" && JudgeAPI.isOnline && JudgeAPI.isOnline();
+  }
+
+  /**
+   * 走浏览器直连通道吗？（玩家认领到了自己的上游 base）
+   *
+   * 直连时锅也必须在**浏览器里**生成 —— 否则「AI 判定在直连、AI 生成锅还在
+   * 打本站 /api」会出现两种坏结果：纯静态宿主上生成必然失败（没有 /api），
+   * 而标题屏 badge 仍写着「AI 生成锅」→ 又是一次谎报（§37 修的就是这类 bug）。
+   */
+  function viaDirect() {
+    var c = (typeof JudgeAPI !== "undefined" && JudgeAPI.cfg) || {};
+    return !!(c.directBase && typeof JudgeAPI.genpotDirect === "function");
   }
 
   function endpoint() {
@@ -99,6 +115,8 @@
 
   /**
    * 后台预取一批锅填入缓冲。永不 throw，永不阻塞游戏。
+   * 两条通道：认领到上游 base 走浏览器直连（通道 A），否则走本站 /api/genpot（通道 B）。
+   * 两条通道的落地逻辑共用 —— 都是「拿到一批原始锅 → sanitize → 入缓冲」。
    * @param {number} n
    * @returns {Promise<number>} 本次成功入缓冲的锅数
    */
@@ -106,6 +124,35 @@
     n = n || FETCH_N;
     if (!online() || inflight >= MAX_CONCURRENT || buffer.length >= HIGH) return Promise.resolve(0);
     inflight++;
+
+    /** 把一批原始锅洗净入缓冲，返回新增条数。 */
+    function absorb(rawPots) {
+      var added = 0;
+      if (Array.isArray(rawPots)) {
+        for (var i = 0; i < rawPots.length && buffer.length < MAX_BUF; i++) {
+          var p = sanitize(rawPots[i], i);
+          if (p) { buffer.push(p); added++; }
+        }
+        if (!added) lastErr = "no_valid_pots";
+      } else {
+        lastErr = "bad_shape";
+      }
+      return added;
+    }
+    function release(added) { inflight--; return added; }
+
+    // ── 通道 A：浏览器直连（玩家自己的 key、自己的网络）──
+    if (viaDirect()) {
+      return JudgeAPI.genpotDirect(n, FETCH_TIMEOUT)
+        .then(function (res) {
+          if (!res || !res.ok) { lastErr = (res && res.code) || "bad_shape"; return 0; }
+          return absorb(res.pots);
+        })
+        .catch(function (e) { lastErr = "unreachable:" + (e && e.name ? e.name : e); return 0; })
+        .then(release);
+    }
+
+    // ── 通道 B：经本站 /api/genpot 转发 ──
     var ctrl = null;
     try { if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ctrl = { signal: AbortSignal.timeout(FETCH_TIMEOUT) }; } catch (e) {}
 
@@ -123,20 +170,14 @@
         return resp.json();
       })
       .then(function (data) {
-        var added = 0;
-        if (data && Array.isArray(data.pots)) {
-          for (var i = 0; i < data.pots.length && buffer.length < MAX_BUF; i++) {
-            var p = sanitize(data.pots[i], i);
-            if (p) { buffer.push(p); added++; }
-          }
-          if (!added) lastErr = "no_valid_pots";
-        } else if (data) {
-          lastErr = (data.error && data.error.code) || "bad_shape";
+        if (!data || !Array.isArray(data.pots)) {
+          if (data) lastErr = (data.error && data.error.code) || "bad_shape";
+          return 0;
         }
-        return added;
+        return absorb(data.pots);
       })
       .catch(function (e) { lastErr = "unreachable:" + (e && e.name ? e.name : e); return 0; })
-      .then(function (added) { inflight--; return added; });
+      .then(release);
   }
 
   /**

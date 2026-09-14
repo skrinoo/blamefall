@@ -1766,7 +1766,9 @@
     refreshNpcBar();
     if (warmup) toast("AI 锅备料中…", 1600);
     devLog("══ 开局 · 判定库 " + Object.keys(VERDICTS.entries).length + " 条 · " +
-           (JudgeAPI.isOnline() ? "在线裁判 " + JudgeAPI.cfg.apiBase : "离线模式（查表 + 兜底引擎）") + " ══", "umb");
+           (JudgeAPI.cfg.directBase
+              ? "浏览器直连 " + JudgeAPI.cfg.directBase
+              : (JudgeAPI.isOnline() ? "在线裁判 " + JudgeAPI.cfg.apiBase : "离线模式（查表 + 兜底引擎）")) + " ══", "umb");
     if (carryOver.extraPots > 0) {
       devLog("上一局寄往未来的锅到货了：掉速 x1.18", "no");
       toast("上一局你寄给未来的锅，到货了。", 3200);
@@ -1944,18 +1946,107 @@
   function openSettings() { $("settings-modal").hidden = false; }
   function closeSettings() { $("settings-modal").hidden = true; }
 
+  // ── 探针结论记忆 ──────────────────────────────────────
+  // 「检测」按钮得出的结论必须能改写标题屏 badge 与状态行。
+  // 为什么不能只靠 isOnline()：它只看后端在不在（/api/health 刻意不带凭据，
+  // 见 engine/api.js probeHealth 注释），无法知道玩家的 key+模型到底通不通。
+  // 探针知道。所以把探针结论记下来，并让「凭据一变即作废」。
+  // 存 localStorage 的理由：刷新页面后不能让那句已被证伪的「热路径」复活。
+  var PROBE_KEY = "bf.probe";
+  var aiProbe = null;    // { ok, code, model, base, plat, tag, at }
+
+  /**
+   * 凭据指纹：key 尾 4 位 + 模型 + 直连 base。任一变化即令旧探针结论作废。
+   * 2026-09-14 加入 base：认领出不同平台（比如 StepFun 的 /v1 与 /step_plan/v1）
+   * 是**两套完全不同的端点**，base 变了结论当然不能沿用。
+   */
+  function credTag(key, model, base) {
+    key = String(key || ""); model = String(model || ""); base = String(base || "");
+    return (key ? key.slice(-4) : "env") + "|" + model + "|" + base.replace(/^https?:\/\//, "").slice(0, 32);
+  }
+  function loadProbe() {
+    try {
+      var raw = localStorage.getItem(PROBE_KEY);
+      aiProbe = raw ? JSON.parse(raw) : null;
+    } catch (e) { aiProbe = null; }
+    if (!aiProbe || typeof aiProbe !== "object") aiProbe = null;
+  }
+  function setProbe(o) {
+    aiProbe = o;
+    try {
+      if (o) localStorage.setItem(PROBE_KEY, JSON.stringify(o));
+      else localStorage.removeItem(PROBE_KEY);
+    } catch (e) { /* ignore */ }
+  }
+  /** 当前生效凭据下仍然成立的探针结论；凭据改过则作废（返回 null）。 */
+  function activeProbe() {
+    if (!aiProbe) return null;
+    return aiProbe.tag === credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase)
+      ? aiProbe : null;
+  }
+
+  /**
+   * 反查一个 base 属于哪家平台（data/gateways.js）。
+   * 用途只有一个：把 base 说成人话 ——「已识别为《硅基流动》」而不是甩一串
+   * URL 给玩家看。手填的地址（开发者后门）反查不到就返回 null。
+   */
+  function findGatewayByBase(base) {
+    if (!base || !window.GATEWAYS) return null;
+    var list = GATEWAYS.list();
+    for (var i = 0; i < list.length; i++) if (list[i].base === base) return list[i];
+    return null;
+  }
+  /** 当前生效的 directBase 属于哪家平台（未识别/手填 → null）。 */
+  function directGateway() { return findGatewayByBase(JudgeAPI.cfg.directBase); }
+  /** 平台中文名；反查不到时返回空串（调用方据此区分「识别出的」与「手填的」）。 */
+  function directPlatName() {
+    var g = directGateway();
+    return g ? g.nameZh : "";
+  }
+  /** 读 #ai-key 输入框的当前值（探针测的是输入框，不是已保存的凭据）。 */
+  function inputKey() {
+    var e = $("ai-key");
+    return e ? String(e.value || "").trim() : "";
+  }
+
   // ═══════════════ AI 凭据设置（标题屏）═══════════════════
   /**
    * 标题屏 AI 设置区：key / 模型输入 + 检测 + 保存/清除。
    * 首次打开（localStorage 没存过 key）加 first-run 高亮提醒填一次；
    * 填过保存后就不再打扰。留空也能玩（离线兜底 / 作者 env key 兜底）。
    */
+  /**
+   * 把候选平台填进下拉框：**给的是中文品牌名，不是 URL**。
+   * 玩家认得「硅基流动」，认不得「https://api.siliconflow.cn/v1」——
+   * 这是整个「出口 1」能成立的全部理由。
+   */
+  function fillPlatformOptions(sel) {
+    if (!sel || !window.GATEWAYS) return;
+    var plats = GATEWAYS.platforms();
+    for (var i = 0; i < plats.length; i++) {
+      var o = document.createElement("option");
+      o.value = plats[i].plat;
+      // 同平台多套 base 的（StepFun 按量 vs 订阅）明说，免得玩家以为选错了
+      o.textContent = plats[i].nameZh + (plats[i].variants > 1 ? "（多套接入地址）" : "");
+      sel.appendChild(o);
+    }
+  }
+
   function initAiSet() {
     var keyEl = $("ai-key"), modelEl = $("ai-model"), onEl = $("ai-on");
+    var baseEl = $("ai-base"), platEl = $("ai-platform");
     if (!keyEl) return;
     keyEl.value = JudgeAPI.cfg.apiKey || "";
     modelEl.value = JudgeAPI.cfg.model || "";
     if (onEl) onEl.checked = !!JudgeAPI.cfg.aiEnabled;
+    if (baseEl) baseEl.value = JudgeAPI.cfg.directBase || "";
+    fillPlatformOptions(platEl);
+    // 已认领过 base → 回填下拉，让「选平台」这个控件反映当前真实状态
+    if (platEl && JudgeAPI.cfg.directBase) {
+      var g0 = directGateway();
+      if (g0) platEl.value = g0.plat;
+    }
+    loadProbe();
     refreshAiStatus();
 
     var stored = false;
@@ -1979,8 +2070,41 @@
         : "已关闭 AI：纯本地判定 + 静态锅，不发任何 AI 请求。", onEl.checked ? "ok" : "");
     });
 
+    // 选平台名 = 认领失败后的第一个出口。玩家认得中文品牌名，不认得 URL。
+    if (platEl) platEl.addEventListener("change", function () {
+      var p = platEl.value;
+      if (!p || !window.GATEWAYS) return;
+      var list = GATEWAYS.byPlat(p);
+      if (!list.length) return;
+      // 同平台有多套 base（StepFun 是按量付费 / Step Plan 订阅两套）时先填第一条，
+      // 「检测」会真打一次；打不通时玩家可改用手填 base（最下面的输入框）。
+      var g = list[0];
+      if (baseEl) baseEl.value = g.base;
+      if (!String(modelEl.value || "").trim() && g.models && g.models.length) {
+        modelEl.value = g.models[0];
+      }
+      // 从下拉里选平台 = 玩家**明确指定**了要用这家（他认得名字，选不出 URL）。
+      // 与「认领」同理，直接落盘 —— 否则「选了平台、检测也通过了，badge 却纹丝不动」
+      // （因为还没点保存），玩家会以为这个下拉是坏的。
+      // 没填 Key 时落盘也是有用的：探针会立刻报「还没填 Key」，比什么都不说更好。
+      JudgeAPI.setCredentials(inputKey(), modelEl ? modelEl.value : "", g.base);
+      refreshAiStatus(); updateMetaMode();
+      setAiHint("已选择《" + g.nameZh + "》" +
+        (list.length > 1 ? "（该平台有多套接入地址，如果连不上请展开最下方手动填）" : "") +
+        "，正在检测…", "");
+      // 选完就验，别让玩家再点一次 —— 这是他刚刚明确表达过的意图。
+      // 注意 probeAI() 会立刻把自己的「检测中…」写进 hint，所以上面那句只作
+      // 「平台名 + 多套 base 提醒」的短暂呈现，最终文案由 probeAI 收尾。
+      probeAI();
+    });
+
     $("ai-save").addEventListener("click", function () {
-      JudgeAPI.setCredentials(keyEl.value, modelEl.value);
+      // 只有凭据真的变了才作废旧探针结论 —— 重复保存同一套凭据时，
+      // 刚才那次「检测：不可用」的结论必须留住，不能因为点了一下保存就复活成「热路径」。
+      var beforeTag = credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase);
+      JudgeAPI.setCredentials(keyEl.value, modelEl.value, baseEl ? baseEl.value : undefined);
+      var afterTag = credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase);
+      if (afterTag !== beforeTag) setProbe(null);
       $("ai-set").classList.remove("first-run");
       var sbSave = $("btn-settings");
       if (sbSave) sbSave.classList.remove("attn");
@@ -1989,11 +2113,23 @@
       setAiHint("已保存到本机浏览器，下次打开不再询问。", "ok");
     });
     $("ai-clear").addEventListener("click", function () {
-      JudgeAPI.setCredentials("", "");
+      var beforeTag = credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase);
+      // 第三个参数传 ""：明确关闭直连通道（区别于 undefined 的「不改动」）
+      JudgeAPI.setCredentials("", "", "");
+      if (credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase) !== beforeTag) setProbe(null);
       keyEl.value = ""; modelEl.value = "";
+      if (baseEl) baseEl.value = "";
+      if (platEl) platEl.value = "";
+      hideDetect();                                // 清掉「可用模型」那一屏
+      // 放宽过的判定预算也一并还原 ——「清除」的语义是「回到出厂状态」。
+      // 否则玩家清掉 key 之后仍在用 3.2s 的预算，锅白飞得久，还找不到原因。
+      var bBefore = { t: JudgeAPI.cfg.timeout, f: JudgeAPI.cfg.flightMs };
+      var bAfter = JudgeAPI.resetBudget() || bBefore;
+      var wasBudget = (bBefore.t !== bAfter.timeout || bBefore.f !== bAfter.flightMs);
       refreshAiStatus();
       recheckAi();
-      setAiHint("已清除，回落作者兜底（需开关开启）。", "");
+      setAiHint("已清除，回落作者兜底（需开关开启）" +
+                (wasBudget ? "，判定预算已还原为出厂值。" : "。"), "");
     });
     $("ai-probe").addEventListener("click", probeAI);
     applyAiGate();
@@ -2002,15 +2138,22 @@
   /** 按 AI 开关启用/禁用凭据输入与按钮，并刷新 badge。 */
   function applyAiGate() {
     var on = !!JudgeAPI.cfg.aiEnabled;
-    var ids = ["ai-key", "ai-model", "ai-probe", "ai-save", "ai-clear"];
+    // ai-platform / ai-base 也要一起禁用：它们是「认领失败后的出口」，
+    // AI 关着的时候给玩家一个能改的控件只会造成「我填了怎么没用」的困惑。
+    var ids = ["ai-key", "ai-model", "ai-probe", "ai-save", "ai-clear", "ai-platform", "ai-base"];
     for (var i = 0; i < ids.length; i++) { var e = $(ids[i]); if (e) e.disabled = !on; }
     var box = $("ai-set"); if (box) box.classList.toggle("off", !on);
     refreshAiStatus();
     updateMetaMode();
   }
 
-  /** 重新探测后端真伪并刷新所有状态文案。 */
+  /**
+   * 重新探测后端真伪并刷新所有状态文案。
+   * 直连模式下**不需要**探测同源后端（那条通路本来就不参与），
+   * 直接刷新文案即可 —— 否则每次保存都要白打一次 /api/health。
+   */
   function recheckAi() {
+    if (JudgeAPI.cfg.directBase) { refreshAiStatus(); updateMetaMode(); return Promise.resolve(); }
     return JudgeAPI.checkBackend().then(function () {
       refreshAiStatus();
       updateMetaMode();
@@ -2022,12 +2165,31 @@
     if (!st) return;
     var cfg = JudgeAPI.cfg, b = cfg.backend, hasKey = !!cfg.apiKey;
     if (!cfg.aiEnabled)  { st.textContent = "AI 已关闭 · 本地兜底 + 静态锅"; st.className = "ai-status"; return; }
+    // 探针结论优先于一切：它验过凭据，而 isOnline()/backend 只验过后端存在。
+    var pr = activeProbe();
+    if (pr && !pr.ok) {
+      st.textContent = probeErrMsg(pr.code) + " · 走判定库兜底";
+      st.className = "ai-status bad";
+      return;
+    }
+    // ★ 通道 A：认领/手填到了上游 base → 浏览器直连。
+    //   刻意**不看 backend** —— 纯静态宿主与 file:// 下根本没有 /api 后端，
+    //   但直连照样能工作。这正是「部署到 GitHub Pages 也有 AI」的由来。
+    if (cfg.directBase) {
+      var pn = directPlatName();
+      st.textContent = "浏览器直连 · " +
+        (pn ? "已识别为《" + pn + "》" : "自填网关地址") + " · " +
+        (cfg.model || "未指定模型") + (pr ? " · 已检测可用" : "");
+      st.className = "ai-status ok";
+      return;
+    }
     if (!cfg.apiBase)    { st.textContent = "离线兜底"; st.className = "ai-status"; return; }
     if (b && !b.present) { st.textContent = "该部署无后端 · 本地兜底 + 静态锅"; st.className = "ai-status"; return; }
-    if (hasKey)          { st.textContent = "用自己的 Key · " + (cfg.model || "默认模型"); st.className = "ai-status ok"; return; }
+    var done = pr ? " · 已检测可用" : "";
+    if (hasKey)          { st.textContent = "用自己的 Key · " + (cfg.model || "默认模型") + done; st.className = "ai-status ok"; return; }
     if (b && b.uncertain) { st.textContent = "后端探测超时 · 仍会尝试 AI（作者兜底）"; st.className = "ai-status ok"; return; }
     if (b && b.present && !b.authorKey) { st.textContent = "后端在 · 无作者 Key（需自填）"; st.className = "ai-status"; return; }
-    st.textContent = "作者兜底 Key · " + (cfg.model || "默认模型");
+    st.textContent = "作者兜底 Key · " + (cfg.model || "默认模型") + done;
     st.className = "ai-status ok";
   }
 
@@ -2037,10 +2199,38 @@
     if (!el) return;
     var n = Object.keys(VERDICTS.entries).length;
     var cfg = JudgeAPI.cfg, b = cfg.backend;
-    if (!cfg.aiEnabled) { el.textContent = "AI 已关闭 · 判定库 " + n + " 条 + 静态锅库"; return; }
-    if (JudgeAPI.isOnline()) { el.textContent = "热路径 · AI 判定 + AI 生成锅 · " + cfg.apiBase; return; }
-    if (cfg.apiBase && b && !b.present) { el.textContent = "冷路径（该部署无 /api 后端）· 判定库 " + n + " 条 + 静态锅库"; return; }
+
+    if (!cfg.aiEnabled) { el.textContent = "AI 已关闭 · 判定库 " + n + " 条 + 静态锅库"; el.className = ""; return; }
+    // ★ 探针说不可用 → badge 必须改口。isOnline() 只证明「后端在」，
+    //   它证明不了「你这把 key + 这个模型能通」，所以不能说「热路径」。
+    var pr = activeProbe();
+    if (pr && !pr.ok) {
+      el.textContent = "AI 不可用：" + probeErrMsg(pr.code) + " · 走本地判定库 " + n + " 条";
+      el.className = "bad";
+      return;
+    }
+    // ★ 通道 A：浏览器直连（2026-09-14 新增）。
+    //   它与「这个部署有没有 /api 后端」完全无关：请求从玩家自己的机器发出，
+    //   静态宿主（GitHub Pages）与 file:// 上同样成立。
+    //   这是「别人的 API Key 也能用 AI」之后新增的第二条热路径。
+    if (cfg.directBase) {
+      var pn = directPlatName();
+      el.textContent = "热路径 · 浏览器直连" + (pn ? "《" + pn + "》" : "") +
+        " · AI 判定 + AI 生成锅" + (pr ? "" : "（未检测）");
+      el.className = "";
+      return;
+    }
+    if (!cfg.apiBase)   { el.textContent = "冷路径 · 判定库 " + n + " 条 + 静态锅库 · 断网可玩"; el.className = ""; return; }
+    if (b && !b.present) { el.textContent = "冷路径（该部署无 /api 后端）· 判定库 " + n + " 条 + 静态锅库"; el.className = ""; return; }
+    if (JudgeAPI.isOnline()) {
+      // 自填 Key 但没点过「检测」= 可用性未知，别把话说满。
+      var untested = (cfg.apiKey && !pr) ? "（未检测）" : "";
+      el.textContent = "热路径 · AI 判定 + AI 生成锅 · " + cfg.apiBase + untested;
+      el.className = "";
+      return;
+    }
     el.textContent = "冷路径 · 判定库 " + n + " 条 + 静态锅库 · 断网可玩";
+    el.className = "";
   }
 
   function setAiHint(msg, cls) {
@@ -2050,17 +2240,376 @@
     h.className = "ai-hint" + (cls ? " " + cls : "");
   }
 
-  /** 点「检测」：拿当前输入的 key/model 真调一次 /api/probe，把结论翻译成提醒。 */
+  /**
+   * 写探针结论。**只在「被测的值 == 当前生效的凭据」时才写** ——
+   * 探针测的是输入框里的值，badge 描述的是「实际生效的凭据」（= 已保存的）。
+   * 两者不一致时只提示、不改 badge，否则等于拿未保存的输入去解释当前状态。
+   * @returns {Boolean} 是否真的写进去了（调用方据此决定要不要加「未保存」脚注）
+   */
+  function recordProbe(ok, code, model, base, plat) {
+    var live = credTag(JudgeAPI.cfg.apiKey, JudgeAPI.cfg.model, JudgeAPI.cfg.directBase);
+    var tested = credTag(inputKey(), model, base);
+    if (tested === live) {
+      setProbe({ ok: !!ok, code: code || null, model: model || "", base: base || "",
+                 plat: plat || "", tag: tested, at: Date.now() });
+    }
+    refreshAiStatus();
+    updateMetaMode();
+    return tested === live;
+  }
+
+  /**
+   * 点「检测」。三条路径按玩家给的信息自动选：
+   *   ① 手填了网关地址   → 直接测那条（开发者后门：自建网关 / 中转站用户）
+   *   ② 填了 Key 没填地址 → **认领**（通道 A 的主路径，也是本功能存在的全部理由）
+   *   ③ 什么都没填       → 测服务端兜底（通道 B）
+   *
+   * 认领失败时按两级出口降级：自动展开「选平台名」，并诚实说明没认出来。
+   * **绝不引导玩家去找 Base URL** —— 实测证明他找不到（控制台只写 key、
+   * 首页 HTML 抓不到、首页写的还可能是错的、同平台可能有多套 base 取决于套餐）。
+   */
   function probeAI() {
-    var keyEl = $("ai-key"), modelEl = $("ai-model");
+    var modelEl = $("ai-model"), baseEl = $("ai-base");
     if (!JudgeAPI.cfg.aiEnabled) { setAiHint("AI 功能已关闭，先打开上面的开关再检测。", "bad"); return; }
-    var base = JudgeAPI.cfg.apiBase;
-    if (!base) { setAiHint("离线模式没有可检测的端点，部署到 Vercel 后才能检测。", "bad"); return; }
+
+    var k = inputKey();
+    var m = modelEl ? String(modelEl.value || "").trim() : "";
+    var typed = baseEl ? String(baseEl.value || "").trim().replace(/\/+$/, "") : "";
+
+    if (!k && !typed) return probeServer();       // ③ 只有服务端能测
+
+    hideDetect();                                  // 每次检测都从干净的一屏开始
     setAiHint("检测中…", "");
     $("ai-probe").disabled = true;
 
+    if (typed) {                                   // ① 手填了地址：认它，不认领
+      var g = findGatewayByBase(typed);
+      // 手填的 base 属于「草稿」→ 不落盘，遵守 §37 那条「探针测输入框、
+      // badge 描述已保存凭据」的规矩。**但如果这个地址就是当前生效的那个**
+      // （认领填进来的 / 玩家自己保存过的），它就不是草稿 → 照常落盘，
+      // 否则认领之后每次点「检测」重测，都得再手动点一次保存才生效。
+      var isLive = (typed === String(JudgeAPI.cfg.directBase || "").replace(/\/+$/, ""));
+      return runModelDetect(typed, g ? g.plat : "", g ? g.nameZh : "", { save: isLive });
+    }
+
+    // ② 认领。一次调用同时回答三件事：哪家 + key 有效吗 + base 是什么。
+    setAiHint("正在识别这把 Key 属于哪家平台…", "");
+    JudgeAPI.identifyKey(k).then(function (res) {
+      if (res.ok) {
+        var hit = res.hits[0];
+        var model = m || hit.model || "";
+        if (baseEl) baseEl.value = hit.base;
+        if (!m && model && modelEl) modelEl.value = model;
+        // 认领是「程序替你发现的」，不是「你填进来的草稿」→ 直接落盘，
+        // 让标题屏 badge 立刻说对话。（§37 那条「探针测输入框」的原则针对的是
+        // 玩家手填未保存的情形；认领不属于此列。）
+        JudgeAPI.setCredentials(k, model, hit.base);
+        refreshAiStatus(); updateMetaMode();
+        setAiHint("✓ 已识别为《" + hit.nameZh + "》" + (hit.label ? "·" + hit.label : "") +
+                  "，正在实测可用模型…", "ok");
+        // 认领之后紧接着「实测哪些模型真能跑」—— 这是玩家真正要的答案。
+        // save:true（认领是程序替你发现的，不是草稿），且实测出的最快可用模型会落盘。
+        runModelDetect(hit.base, hit.plat, hit.nameZh, { save: true });
+        return;
+      }
+      // 认领失败 —— 两级出口，且**不引导玩家去找 base**
+      $("ai-probe").disabled = false;
+      var adv = $("ai-adv"); if (adv) adv.open = true;   // 自动展开，不让玩家自己找
+      var code = (res.code === "all_unreachable") ? "all_unreachable" : "unrecognized";
+      var saved = recordProbe(false, code, m, "");
+      // 与 finishProbeDirect 同一套脚注逻辑：探针测的是输入框，badge 描述的是已保存
+      // 凭据。玩家在输入框里试了一把新 key 却没保存时，badge 不该改口 —— 但必须说清，
+      // 否则他会以为 badge 坏了（这正是本轮验收脚本抓出来的那一条）。
+      var cnote = saved ? "" : "（未保存 · 标题屏状态仍按已保存的凭据显示）";
+      if (code === "all_unreachable") {
+        setAiHint("✗ 连不上候选平台（网络或代理问题）。已展开下方手动指定；" +
+                  "也可先不填 Key，用本机判定库玩。" + cnote, "bad");
+      } else {
+        setAiHint("✗ 没认出这把 Key 属于哪家平台 —— 可能是这把 Key 无效，" +
+                  "或这家平台还没被收录。下方已展开：可以从平台列表里选一个，" +
+                  "或先不填 Key 用本机判定库。" + cnote, "bad");
+      }
+    }).catch(function () {
+      $("ai-probe").disabled = false;
+      recordProbe(false, "unreachable", m, "");
+      setAiHint("✗ 识别请求失败（网络/跨域）。", "bad");
+    });
+  }
+
+  // ═══════════ 模型可用性侦测（认领之后：哪个模型真能跑判定）═══════════
+  //
+  // 认领（identifyKey）只回答「这把 Key 属于哪家平台」。玩家真正要知道的是
+  // 第二问：「这家平台里哪个模型**真的能跑本游戏的 AI 判定**」。
+  // 第二问的答案经常是「一个都不行」，所以这一屏必须把「不行」的原因说清楚：
+  //   没这个模型 / 余额不足 / 只吐思维链 / 输出不是合法判定 JSON /
+  //   **太慢** —— 判定还没回来就被超时丢弃，游戏里永远走兜底。
+  //
+  // 最后一种最隐蔽：如果不把实测耗时摆出来，玩家会看到
+  // 「已识别为《TokenDance》· 已检测可用」，而游戏里一句 AI 文案都没有 ——
+  // 正是 §37 修掉的那类谎报。所以「可用」的判定标准不是「请求通了」，
+  // 而是「实测耗时 ≤ 判定预算」。
+  //
+  // 成本：一次实测要花玩家 ~2k token 和 10–25 秒，所以**只在他点「检测」时跑**，
+  // 且每批最多 CFG.probeMax 个，靠「再测下一批」逐批推进（TokenDance 一家 93 个）。
+
+  var detectRows = [];     // 累积已实测的行（再测下一批时保留前几批结论）
+
+  function hideDetect() {
+    var box = $("ai-detect");
+    if (box) { box.hidden = true; box.innerHTML = ""; }
+    detectRows = [];
+  }
+
+  /** 一行结论的展示态。「可用」= 请求通了**且**实测耗时进得了判定预算。 */
+  function rowStatus(r, budget) {
+    if (r.ok) {
+      var to = (budget && budget.timeout) || 1850;
+      if (r.latencyMs <= to) return { cls: "ok", text: "可用" };
+      return { cls: "slow", text: "可用但超预算 " + (r.latencyMs / to).toFixed(1) + "×" };
+    }
+    return { cls: "bad", text: probeErrMsg(r.code) };
+  }
+
+  function usableCount(rows, budget) {
+    var to = (budget && budget.timeout) || 1850, n = 0;
+    for (var i = 0; i < rows.length; i++) if (rows[i].ok && rows[i].latencyMs <= to) n++;
+    return n;
+  }
+
+  /**
+   * 在给定 base 上批量实测模型可用性，把结论渲染给玩家，并按结论落盘。
+   *
+   * @param {String} base
+   * @param {String} plat      平台归组键（用于取候选池的推荐模型）
+   * @param {String} platName  中文品牌名（反查不到就是手填，传空串）
+   * @param {Object} opts      { offset, append, save }
+   *        save=true 才把「选中的模型 + base」落盘。认领路径传 true（认领是
+   *        程序替你发现的，不是草稿）；手填 base 的路径传 false，遵守 §37
+   *        那条「探针测输入框、badge 描述已保存凭据」的规矩。
+   */
+  function runModelDetect(base, plat, platName, opts) {
+    opts = opts || {};
+    var k = inputKey();
+    var modelEl = $("ai-model");
+    var typedModel = modelEl ? String(modelEl.value || "").trim() : "";
+    var box = $("ai-detect");
+
+    if (!opts.append && box) { box.hidden = false; box.innerHTML = ""; }
+    setAiHint("正在实测《" + (platName || "该网关") + "》的模型（每个模型真跑一次判定，" +
+              "约 10–25 秒）…", "");
+    $("ai-probe").disabled = true;
+
+    return JudgeAPI.probeModels({ base: base, key: k, plat: plat, offset: opts.offset || 0 })
+      .then(function (res) {
+        $("ai-probe").disabled = false;
+
+        // 这家不提供 /models（自建网关 / 中转站常见），也没有作者预设 →
+        // 退回「用你填的模型名打一次」的老路，并说清为什么。
+        if (res.code === "no_models") {
+          hideDetect();
+          setAiHint("这家没提供模型清单，改用你填的模型名测一次…", "");
+          return finishProbeDirect(base, typedModel, platName);
+        }
+
+        detectRows = opts.append ? detectRows.concat(res.rows) : res.rows.slice();
+        // ★ 跨批次取最优：再测下一批如果那批恰好全是不可用的模型，**不能**把
+        //   上一批已经测出来的可用结论冲掉 —— 玩家视角那是「越测越差，
+        //   明明测出过能用的，现在又说不行了」。
+        var ob = JudgeAPI.bestOf(detectRows);
+        res.rows = detectRows; res.best = ob.best; res.budget = ob.budget;
+        renderDetect(res, { base: base, plat: plat, platName: platName,
+                            save: !!opts.save, model: typedModel });
+
+        var best = res.best;
+        var enough = best && res.budget && res.budget.enough;
+        if (best && modelEl) modelEl.value = best.model;
+
+        if (enough) {
+          if (opts.save) JudgeAPI.setCredentials(k, best.model, base);
+          var saved = recordProbe(true, null, best.model, base, platName);
+          setAiHint("✓ " + (platName ? "已识别为《" + platName + "》· " : "") +
+                    "实测 " + detectRows.length + " 个模型，" +
+                    usableCount(detectRows, res.budget) + " 个能用 · 已选用 " +
+                    best.model + "（" + best.latencyMs + "ms）" +
+                    (saved ? "" : "（未保存 · 标题屏状态仍按已保存的凭据显示）"), "ok");
+          return res;
+        }
+
+        if (best) {
+          // 有能跑的模型，但比判定预算慢 → **不能说「可用」**。
+          // 说了而游戏里永远走兜底，就是 §37 那类谎报。诚实报 + 给一个一键放宽。
+          if (opts.save) JudgeAPI.setCredentials(k, best.model, base);
+          recordProbe(false, "over_budget", best.model, base, platName);
+          setAiHint("⚠ 模型能跑，但实测 " + best.latencyMs + "ms 超过判定预算 " +
+                    res.budget.timeout + "ms —— 判定会在锅落地前被丢弃，游戏里仍走兜底。" +
+                    "点下方「放宽判定预算」就能用它。", "bad");
+          return res;
+        }
+
+        // 用 bestOf 的**精确**失败码（全 401 → 就是 Key 的错；各模型原因不一致
+        // → 才是笼统的 all_models_failed），别硬编一个笼统的。
+        var badCode = ob.code || "all_models_failed";
+        recordProbe(false, badCode, typedModel, base, platName);
+        setAiHint("✗ " + probeErrMsg(badCode) + "（实测 " + detectRows.length +
+                  " 个模型，明细见下）" +
+                  (res.nextOffset !== null ? "，可点「再测下一批」继续。" : "。"), "bad");
+        return res;
+      })
+      .catch(function () {
+        $("ai-probe").disabled = false;
+        setAiHint("✗ 模型侦测失败（网络/跨域）。", "bad");
+      });
+  }
+
+  /** 渲染侦测结果面板。用 DOM API 而不是 innerHTML —— 模型名来自外部接口，不可信。 */
+  function renderDetect(res, ctx) {
+    var box = $("ai-detect");
+    if (!box) return;
+    box.innerHTML = "";
+    box.hidden = false;
+
+    var budget = res.budget || {};
+    var cur = JudgeAPI.cfg.model;
+
+    var hd = document.createElement("div");
+    hd.className = "ai-detect-hd";
+    hd.textContent = "模型可用性实测 · 用你的 Key 真跑一次判定" +
+      (res.source === "api" ? "（清单来自该平台 /models）"
+       : res.source === "both" ? "（作者预设 + 平台 /models）"
+       : res.source === "pool" ? "（清单来自作者预设）" : "");
+    box.appendChild(hd);
+
+    var list = document.createElement("div");
+    list.className = "ai-detect-list";
+    for (var i = 0; i < detectRows.length; i++) {
+      (function (r) {
+        var st = rowStatus(r, budget);
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "ai-drow " + st.cls + (r.model === cur ? " cur" : "");
+        row.title = r.snippet || "";
+
+        var m = document.createElement("span");
+        m.className = "dm";
+        m.textContent = (r.model === cur ? "● " : "") + r.model;
+
+        var t = document.createElement("span");
+        t.className = "dt";
+        t.textContent = r.latencyMs ? r.latencyMs + "ms" : "—";
+
+        var n = document.createElement("span");
+        n.className = "dn";
+        n.textContent = st.text;
+
+        row.appendChild(m); row.appendChild(t); row.appendChild(n);
+        row.addEventListener("click", function () { pickModel(r.model, ctx, res); });
+        list.appendChild(row);
+      })(detectRows[i]);
+    }
+    box.appendChild(list);
+
+    // 有能跑的模型但超预算 → 一键放宽（代价是锅飞得更久，由玩家决定）
+    if (res.best && budget && !budget.enough) {
+      var rb = document.createElement("button");
+      rb.type = "button";
+      rb.className = "ai-detect-act primary";
+      rb.textContent = "放宽判定预算到 " + budget.needMs + "ms 并用 " + res.best.model +
+                       "（锅会飞得久一点）";
+      rb.addEventListener("click", function () { relaxBudget(ctx, res); });
+      box.appendChild(rb);
+    }
+
+    // 还有没测过的候选 → 再测一批
+    if (res.nextOffset !== null && res.nextOffset !== undefined) {
+      var mb = document.createElement("button");
+      mb.type = "button";
+      mb.className = "ai-detect-act";
+      mb.textContent = "再测下一批（第 " + (res.nextOffset + 1) + "–" +
+        Math.min(res.nextOffset + (JudgeAPI.cfg.probeMax || 6), res.candidates) +
+        " 个，共 " + res.candidates + " 个候选）";
+      mb.addEventListener("click", function () {
+        runModelDetect(ctx.base, ctx.plat, ctx.platName,
+                       { offset: res.nextOffset, append: true, save: ctx.save });
+      });
+      box.appendChild(mb);
+    }
+
+    var note = document.createElement("div");
+    note.className = "ai-detect-note";
+    note.textContent = "判定预算 " + (budget.timeout || "-") + "ms（锅飞行 " +
+      (budget.flightMs || "-") + "ms）。超预算的模型即使能回答，判定也会被超时丢弃。";
+    box.appendChild(note);
+  }
+
+  /** 点某一行 = 选用这个模型：重新实测一次（结论可能已过期），再落盘。 */
+  function pickModel(model, ctx, res) {
+    var k = inputKey();
+    var modelEl = $("ai-model");
+    setAiHint("正在复测 " + model + " …", "");
+    $("ai-probe").disabled = true;
+    JudgeAPI.probeModelOnce({ base: ctx.base, key: k, model: model }).then(function (r) {
+      $("ai-probe").disabled = false;
+      for (var i = 0; i < detectRows.length; i++) if (detectRows[i].model === model) detectRows[i] = r;
+      if (modelEl) modelEl.value = model;
+      var enough = r.ok && r.latencyMs <= ((res.budget && res.budget.timeout) || 1850);
+      if (ctx.save) JudgeAPI.setCredentials(k, model, ctx.base);
+      var saved = recordProbe(!!enough, enough ? null : (r.ok ? "over_budget" : r.code),
+                              model, ctx.base, ctx.platName);
+      renderDetect(res, ctx);
+      var note = saved ? "" : "（未保存 · 标题屏状态仍按已保存的凭据显示）";
+      setAiHint(enough
+        ? "✓ 已选用 " + model + "（" + r.latencyMs + "ms）" + note
+        : (r.ok ? "⚠ " + model + " 能跑，但 " + r.latencyMs + "ms 超过判定预算 —— 需先放宽预算"
+                : "✗ " + model + "：" + probeErrMsg(r.code)) + note,
+        enough ? "ok" : "bad");
+    });
+  }
+
+  /** 一键放宽判定预算：只在玩家点这里时才改（锅飞得更久的代价由他承担）。 */
+  function relaxBudget(ctx, res) {
+    var b = res.budget;
+    if (!b || !b.needMs) return;
+    var got = JudgeAPI.setBudget(b.needMs, b.needFlightMs);
+    if (!got) return;
+    if (ctx.save) JudgeAPI.setCredentials(inputKey(), b.model, ctx.base);
+    var saved = recordProbe(true, null, b.model, ctx.base, ctx.platName);
+    renderDetect(res, ctx);
+    var note = saved ? "" : "（未保存 · 标题屏状态仍按已保存的凭据显示）";
+    setAiHint("✓ 判定预算已放宽到 " + got.timeout + "ms（锅飞行 " + got.flightMs +
+              "ms），已选用 " + b.model + "（实测 " + b.latencyMs + "ms）" + note, "ok");
+  }
+
+  /** 通道 A 的收尾：真打一次上游，把结论写进探针。 */
+  function finishProbeDirect(base, model, platName) {
+    JudgeAPI.probeDirect({ base: base, key: inputKey(), model: model }).then(function (r) {
+      $("ai-probe").disabled = false;
+      var saved = recordProbe(r.ok, r.code, model, base, platName);
+      var note = saved ? "" : "（未保存 · 标题屏状态仍按已保存的凭据显示）";
+      if (r.ok) {
+        setAiHint("✓ 可用：" + model + "（" + r.latencyMs + "ms · 浏览器直连" +
+                  (platName ? " · 《" + platName + "》" : "") + "）" + note, "ok");
+      } else {
+        setAiHint("✗ 不可用：" + probeErrMsg(r.code) + "（模型 " + model + "）" + note, "bad");
+      }
+    });
+  }
+
+  /** 通道 B 的检测：没填 Key 时测服务端兜底网关（现有行为，未改动）。 */
+  function probeServer() {
+    var modelEl = $("ai-model");
+    hideDetect();                                  // 服务端通道没有「模型清单」这一屏
+    var base = JudgeAPI.cfg.apiBase;
+    if (!base) {
+      setAiHint("没填 Key 就只能靠服务端兜底，而这个部署没有 /api 后端。" +
+                "填一把自己的 Key 才能真正用上 AI。", "bad");
+      return;
+    }
+    setAiHint("检测中…", "");
+    $("ai-probe").disabled = true;
+
+    var k = inputKey();
+    var m = modelEl ? String(modelEl.value || "").trim() : "";
     var headers = {};
-    var k = (keyEl.value || "").trim(), m = (modelEl.value || "").trim();
     if (k) headers["x-bf-key"] = k;
     if (m) headers["x-bf-model"] = m;
 
@@ -2068,22 +2617,24 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         $("ai-probe").disabled = false;
+        var note = "（未保存 · 标题屏状态仍按已保存的凭据显示）";
         if (j && j.ok) {
-          setAiHint("✓ 模型可用：" + j.model + "（" + j.latencyMs + "ms · key 来源 " + j.keySource + "）", "ok");
-          refreshAiStatus();
+          var okSaved = recordProbe(true, null, j.model || m, "", "");
+          setAiHint("✓ 模型可用：" + j.model + "（" + j.latencyMs + "ms · key 来源 " +
+                    j.keySource + "）" + (okSaved ? "" : note), "ok");
           return;
         }
         // error 有两种形态：200+ok:false 时是字符串码（"http_401"），
         // 503 未配置时是 {code,hint} 对象。统一取码，否则会把对象拼成 [object Object]。
         var code = (j && j.error) ? (typeof j.error === "object" ? j.error.code : j.error) : null;
-        if (!code || code === "gateway_not_configured" || code === "not_configured") {
-          setAiHint("✗ 不可用：服务端未配置网关。", "bad");
-        } else {
-          setAiHint("✗ 不可用：" + probeErrMsg(code) + "（模型 " + ((j && j.model) || "?") + "）", "bad");
-        }
+        if (!code || code === "gateway_not_configured" || code === "not_configured") code = "not_configured";
+        var badSaved = recordProbe(false, code, (j && j.model) || m, "", "");
+        setAiHint("✗ 不可用：" + probeErrMsg(code) +
+                  "（模型 " + ((j && j.model) || "?") + "）" + (badSaved ? "" : note), "bad");
       })
       .catch(function () {
         $("ai-probe").disabled = false;
+        recordProbe(false, "unreachable", m, "", "");
         setAiHint("✗ 检测请求失败（网络/跨域）。", "bad");
       });
   }
@@ -2095,9 +2646,23 @@
       case "http_402": return "账户余额不足（402）";
       case "http_403": return "Key 无权限（403）";
       case "http_404": return "模型不存在（404），换个模型 ID";
+      case "not_configured": return "服务端未配置网关";
       case "timeout": return "上游超时，稍后再试";
       case "unreachable": return "连不上网关，检查网络";
       case "empty_content": return "模型只吐思维链、不出正文（思考型）。换非思考模型，或服务端配正数 max_tokens / 关思考参数";
+      case "bad_json": return "网关返回的不是标准 JSON";
+      // ── 通道 A（浏览器直连 / 认领）新增的码 ──
+      case "no_key": return "还没填 Key";
+      case "no_base": return "还没指定网关地址";
+      case "no_model": return "没指定模型，请在上面的模型框里填一个";
+      case "unrecognized": return "认不出这把 Key 属于哪家平台";
+      case "all_unreachable": return "连不上候选平台（网络或代理问题）";
+      case "prompt_unreachable": return "读不到 prompt 文件 —— 本地双击打开（file://）时无法直连，请用部署版";
+      // ── 模型可用性侦测新增的码 ──
+      case "no_models": return "这家平台没列出可用的对话模型";
+      case "all_models_failed": return "试过的模型都用不了";
+      case "over_budget": return "模型能跑，但比判定预算慢（判定会被超时丢弃）";
+      case "bad_output": return "模型没按格式输出判定 JSON";
       default: return code || "未知错误";
     }
   }
@@ -2140,13 +2705,20 @@
     // 探测未回时乐观为 true，所以此刻就能发），让 genpot 在标题屏期间就暖起来。
     // 静态宿主（Pages）会白吃一个 genpot 404，代价为零（catch 后落静态锅）。
     if (JudgeAPI.isOnline() && typeof PotGen !== "undefined") PotGen.prefetch(2);
-    // 探测后端真伪（静态宿主无 /api），据实刷新 badge 文案，避免把「无后端」谎报成「作者兜底」。
-    JudgeAPI.checkBackend().then(function () {
+    if (JudgeAPI.cfg.directBase) {
+      // 通道 A：已经认领到玩家自己的上游 base，直连即可用 ——
+      // 不必探同源后端（那条通路根本不参与），也不必等 health 回来才说对话。
       refreshAiStatus();
       updateMetaMode();
-      // 仅当上面那次预取没填进货（被离线 gate 掉或失败）才补一次，避免每次加载都双发 genpot 白烧 token。
-      if (JudgeAPI.isOnline() && typeof PotGen !== "undefined" && PotGen.size() === 0) PotGen.prefetch(2);
-    });
+    } else {
+      // 探测后端真伪（静态宿主无 /api），据实刷新 badge 文案，避免把「无后端」谎报成「作者兜底」。
+      JudgeAPI.checkBackend().then(function () {
+        refreshAiStatus();
+        updateMetaMode();
+        // 仅当上面那次预取没填进货（被离线 gate 掉或失败）才补一次，避免每次加载都双发 genpot 白烧 token。
+        if (JudgeAPI.isOnline() && typeof PotGen !== "undefined" && PotGen.size() === 0) PotGen.prefetch(2);
+      });
+    }
 
     // 自检：把四个真实案例跑一遍，结果打进开发者面板，
     // 这样评审现场按一下 ` 就能看见判定引擎是真的在算，不是写死的动画。

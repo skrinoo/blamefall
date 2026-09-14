@@ -1732,6 +1732,11 @@ if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch()
 
 **后续落地**：本轮用户批准「相同流程修复」，水逆头像按相同流程修复并验证通过，详见 §36.2。
 
+**改动清单**：
+- `assets-light/avatars/avh-tianqi.webp`：9096 → 42700 bytes（PNG → lossless WebP）
+- `assets-light/avatars/avh-tianqi.webp.bak`：原文件备份
+- 新增脚本：`C:\Users\skrin\.workbuddy\bf\convert_tianqi.py`（PNG → WebP + 备份）、`verify_tianqi.py`（WebP 解码与透明度验证）、`accept_tianqi.js`（无头浏览器加载验收）
+
 ---
 
 ## 36.2 亮版水逆头像残缺修复：与天气同流程（2026-09-13）
@@ -1777,7 +1782,444 @@ if (window.BFAudio && typeof BFAudio.prefetch === 'function') BFAudio.prefetch()
 - **prompt 的"紫对光 / 琥珀轮廓光"等光效要求会画歪到圆形卡外**：模型难以精确控制光效只在卡片内部。需要二次清理：**按"距画面外缘距离"判据剔除孤立色弧**，比"按 bbox 中心距"更鲁棒
 - **连通区域标记无 scipy 也能做**：8-连通 BFS 自实现就够了，6 个区域不到 1ms
 
+
+---
+
+## 37. 「检测到不可用」后 badge 仍谎报热路径：让探针结论接管 badge（2026-09-14）
+
+**需求**：用户在生产部署 `blamefall-yy3a.vercel.app` 上点「检测」，得到
+`✗ 不可用：Key 无效或已过期（401）（模型 deepseek-v3.2）`，但标题屏底部 badge 仍写着
+`热路径 · AI 判定 + AI 生成锅 · https://blamefall-yy3a.vercel.app`。
+**「检测」已经证伪了这条路，界面却还在宣称它通。** 与 §14「badge 说真话」是同一主题的第二轮。
+
+**根因**：§14 把 badge 的真值源定成了 `isOnline()`：
+
+```js
+isOnline() = isEnabled() && (!backend || backend.present)
+```
+
+`backend` 来自开机对 `/api/health` 的能力探测（`probeHealth`）。而 `/api/health` **刻意不带任何凭据头**
+（§14 自己写的理由：「不能把玩家 key 发给健康检查」）—— 所以它只能回答「这个部署有没有 `/api` 后端」，
+**回答不了「你这把 key + 这个模型能不能通」**。于是后端存在 → `present:true` → badge 说「热路径」，
+与凭据是否有效完全无关。
+
+「检测」按钮（`/api/probe`）是**唯一**会带上 `x-bf-key`/`x-bf-model` 真打一次上游的路径，但它的结论此前
+只写进 `#ai-hint` 一行小字：`probeAI()` 既没调 `updateMetaMode()`，也没把结论存下来 —— 设置弹窗一关就
+什么都看不见了。
+
+一句话：**「后端在不在」与「凭据通不通」是两个独立的真值域，而 badge 只听了前者。**
+
+**修复**：给探针结论建一份可持久化的记忆，让 badge 与状态行都以它为先。
+
+| 件 | 做法 |
+|---|---|
+| `aiProbe` 记忆 | `game.js` 模块级 `{ok, code, model, tag, at}`，落 `localStorage('bf.probe')` |
+| `credTag(key, model)` | 凭据指纹 = key 尾 4 位 + 模型；凭据一变即令旧结论作废，避免拿过期结论解释新配置 |
+| `activeProbe()` | 只有 `tag` 等于当前生效凭据（`cfg.apiKey`/`cfg.model`）的结论才算数 |
+| `probeAI()` | 成功/失败都 `setProbe(...)` → `refreshAiStatus()` + `updateMetaMode()`；`probeErrMsg()` 补 `not_configured` 分支 |
+| 探针测的是输入框、badge 描述的是已保存凭据 | 两者不一致时**只提示、不改 badge**，hint 追加「（未保存 · 标题屏状态仍按已保存的凭据显示）」 |
+| `updateMetaMode()` | 在 `isOnline()` 之前插一道探针闸门：`pr && !pr.ok` → 红字「AI 不可用：〈原因〉 · 走本地判定库 N 条」+ `.bad`；自填 key 且未检测时热路径后加「（未检测）」 |
+| `refreshAiStatus()` | 同一道闸门：红字「〈原因〉 · 走判定库兜底」+ `ai-status bad` |
+| 保存 / 清除 | 只在**凭据确实变了**时 `setProbe(null)`；重复保存同一套凭据必须保住「不可用」结论 |
+| `style.css` | 新增 `#meta-mode.bad { color: var(--bad) }`（亮版 `#d64545` / 暗版 `#e2564d`） |
+
+**验证**（`bf/verify_ai_badge.js`，无头 Edge + CDP，14 项断言，两轮全过）：
+
+第一轮打内置假后端（完全复现线上 `http_401`），第二轮 `BF_TARGET=http://127.0.0.1:8200` 打**真 dev-server**
+（它内置 `/api/probe` 失败模拟：key 以 `bad`/`invalid`/`expired` 开头即返回 `http_401`）。
+
+- **[1] 检测之前**：`热路径 · AI 判定 + AI 生成锅 · http://127.0.0.1:8200（未检测）`，非红色 —— 没验过就不把话说满
+- **[2] 点「检测」之后**：`AI 不可用：Key 无效或已过期（401） · 走本地判定库 59 条`，`class=bad`，渲染 `rgb(214,69,69)`；
+  状态行同步为 `Key 无效或已过期（401） · 走判定库兜底` + `ai-status bad`；
+  `bf.probe = {"ok":false,"code":"http_401","tag":"1111|deepseek-v3.2"}` 落盘
+- **[3] 刷新页面**：结论留存，仍是「AI 不可用」（**不许复活**）
+- **[4] 换模型并保存**：旧 401 结论作废，回到「（未检测）」乐观态
+- **[5] 再检测 → 重复保存同一套凭据**：结论**不被洗掉**，仍是 `bad`
+- **[6] 控制台**：无 JS 异常（两个场景都只剩 `favicon.ico` 404，与本次改动无关）
+- 项目自带 `scripts/smoke-test.ps1`：**45 / 45 全部通过**（先起 `scripts/dev-server.ps1 -Port 8200`），无回归
+- 截图：`bf/shot-ai-badge-401.png`（弹窗内状态行已变红）、`bf/shot-ai-badge-title.png`（标题屏 badge 已变红字）
+
 **改动清单**：
-- `assets-light/avatars/avh-tianqi.webp`：9096 → 42700 bytes（PNG → lossless WebP）
-- `assets-light/avatars/avh-tianqi.webp.bak`：原文件备份
-- 新增脚本：`C:\Users\skrin\.workbuddy\bf\convert_tianqi.py`（PNG → WebP + 备份）、`verify_tianqi.py`（WebP 解码与透明度验证）、`accept_tianqi.js`（无头浏览器加载验收）
+- `game.js`：新增 `PROBE_KEY`/`aiProbe`/`credTag`/`loadProbe`/`setProbe`/`activeProbe`；改写 `refreshAiStatus()`、
+  `updateMetaMode()`、`probeAI()`、`probeErrMsg()`；`initAiSet()` 加 `loadProbe()`；保存 / 清除按钮改为
+  「凭据真变了才作废探针结论」
+- `style.css`：`.title-meta` 之后新增 `#meta-mode.bad` 一条规则
+- `docs/DEVLOG.md`：§36.2 尾部误置的「天气改动清单」归位回 §36（见下方教训最后一条）
+- 新增脚本：`C:\Users\skrin\.workbuddy\bf\verify_ai_badge.js`（支持 `BF_TARGET=` 切换目标）
+
+**教训**：
+- **「有没有后端」和「凭据能不能用」是两个独立的真值域。** 能力探测刻意不带凭据是安全上的正确选择，
+  但它注定回答不了凭据问题 —— 那就必须有第二条链路（探针）来回答，而且它的结论要能写回 UI。
+- **诊断结论一旦得出，就必须有持久化的落点。** 本次 bug 的一半是「结论只活在一行 hint 里」：弹窗一关、
+  页面一刷就没了，界面于是回到默认的乐观态。把结论存成「带凭据指纹的缓存」比每次开机自动重探更省配额，
+  也更尊重既有的「不主动把 key 发出去」约定。
+- **作废条件要精确。** `setProbe(null)` 必须在「凭据真的变了」时才调用；写成「保存就清」会造出一个更隐蔽的
+  bug —— 用户点一下保存，刚被证伪的「热路径」就复活了。
+- **把用户报的 UI 不一致当 bug 查，而不是解释成「设计如此」。** `isOnline()` 的定义确实「没错」，
+  但它和用户看到的现实不符，那就是 bug。
+- **整理文档时留意跨节粘连**：§36.2 追加时把 §36 的「改动清单」块一起粘到了文件尾，导致同一份清单丢失且
+  错挂在别人章节下。APPEND 之前先确认上一节的结尾形态，别让块级内容越过 `---` 分隔线。
+
+---
+
+## 38. 「别人的 API Key」也能用 AI：双通道 + 候选池认领（2026-09-14）
+
+### 38.1 需求
+
+> 「如果我想让别人用的 APIkey（不知道是什么平台的）也能够使用 AI 功能怎么改进」
+
+以及在整个设计过程中被用户连续三次推翻的三句话——
+
+1. 「那玩家不填 base 的话不就只能用兜底了吗」（指出「base 必填」是缺口）
+2. 「玩家怎么知道 base 填什么」（指出「提示手填网关地址」是句空话）
+3. 「但是 tokendance 和 stepfun 上我就没有找 base URL」（指出「页面上通常写着 Base URL」是**错的**）
+
+第 3 条是决定性的：它推翻的不是措辞，而是整个「让玩家提供 base」的方向。
+
+### 38.2 根因
+
+**表层根因**（2026-09-13 已锁定）：`api/_gateway.mjs:70` 的 base 只读
+`process.env.BLAMEFALL_API_BASE`，玩家改不了。于是任何外来 key 都被送到**作者配的那个网关**
+去 → 401。同一把 key 直连上游 200、线上 `/api/probe` 401，就是这个原因。
+
+**深层根因**（本轮才想清楚）：**base 的所有权无法交给服务端**（那等于开放 SSRF，
+`_gateway.mjs:67` 的注释就是为这条而写），而**玩家自己也拿不到 base**。四条实测反证：
+
+| # | 反证 | 实测 |
+|---|---|---|
+| ① | **控制台只写 key，不写 base** | StepFun 的 Base URL 在「用户中心 → Step Plan 接入信息」，**不在「接口密钥」页**。玩家在拿 key 的地方找 base，永远找不到 |
+| ② | **首页 HTML 里也抓不到** | 抓 5 家首页搜 base 形状的串 → **5 家 0 命中**。TokenDance 1874 字节 / DeepSeek 2803 字节都是 **SPA 空壳**；SiliconFlow 唯一命中的还是无关的阿里云监控域名（假阳性）→ 「让玩家粘个网址、程序去抓 base」这条路也不通 |
+| ③ | **首页偶尔给「错的」base** | TokenDance 首页装饰文案是 `baseURL: "tokendance.space"`，实测 `POST https://tokendance.space` → **405 Not Allowed**（照抄必挂）。真地址 `/gateway/v1` 只出现在 curl 示例里 —— **等于要求玩家会读 curl** |
+| ④ | **同平台可能有多套 base** | StepFun 的 `https://api.stepfun.com/v1`（按量付费）与 `.../step_plan/v1`（Step Plan 订阅）**两套都活着**（无 key 探测均 401）。玩家买的是哪套决定该填哪个，而他不可能知道 |
+
+> **本质：base 是「开发者文档级信息」，不是「控制台用户级信息」。**
+> 平台把 key 放控制台显眼处（因为要复制），把 base 放文档 / 代码示例里（因为它假设读到
+> 这里的人会调 API）。聚合网关（TokenDance）把 base 做成营销文案；模型厂商（StepFun）
+> 把 base 绑在套餐上。**两种动机指向同一个结果：base 不会出现在玩家会看的地方。**
+
+结论：**别问玩家，让程序认领。**
+
+### 38.3 实现
+
+**双通道架构**
+
+| 通道 | 触发条件 | base 来自 | 服务器参与 |
+|---|---|---|---|
+| **A 浏览器直连**（新增，优先） | `CFG.directBase` 非空 | **认领探测得出**（或开发者后门手填） | **完全不参与** |
+| **B 同源代理**（保留） | 其余情况 | 服务端 env | 转发 |
+
+`CFG.directBase` 只允许存在于浏览器。**绝不把它作为请求头发给本站 `/api/*`** ——
+服务端一旦接受玩家提供的 base，SSRF 这个面就又搬回来了。这条写进了 `engine/api.js` 的文件头。
+
+顺带解决两个老问题：纯静态宿主（GitHub Pages）现在也能有 AI；`file://` 双击态在能取到
+prompt 的前提下同样可用（取不到时报 `prompt_unreachable`，诚实回落）。
+
+**认领判据**（`identifyKey()`，实测 5/5 成立、零 token、76–350ms）
+
+```
+POST {base}/chat/completions  {"model":"__bf_probe_nonexistent_model__"}
+  400 且响应回显这个假模型名  → 就是这家（鉴权中间件已通过，调用在「模型不存在」处被拒 → 零 token）
+  401 / 403                 → 不是这家
+  其它（429/5xx/跨域失败）   → 问不出来，既不算命中也不算排除
+```
+
+⚠️ **不能用 `GET {base}/models` 当判别器**：实测 TokenDance 与 OpenRouter 的 `/models`
+**不带 key 也返回 200**（匿名开放）→ 所有候选假阳性。这是第一版设想的硬错误，已推翻。
+
+**候选池条目粒度 = 「平台 × base 变体」**（`data/gateways.js`）
+
+由反证 ④ 推出：一个平台可能对应多条 base。同平台的多套 base 都进池，认领时**按 `plat`
+字段聚合** —— 任一变体命中即该平台命中，并记住**命中的那个 base**（而非该平台的第一个）。
+StepFun 就是靠这条被正确区分的。
+
+**候选池的硬边界是 CORS**：认领探测本身就是一次浏览器跨域请求，所以「能被认领的平台」
+= 「允许 CORS 的平台」。实测 11/15 可进池；Groq / Together / OpenAI 官方 / Anthropic
+（均 403 且无任何 `Access-Control-*` 头）**刻意不进池** —— 加进来也认领不到，只会白等一轮超时。
+
+**候选池 base 质量已验证**：对池内 10 家**无 key** POST `{base}/chat/completions` →
+**10/10 全部返回 401**（= 端点存在 + 鉴权中间件在 ⇒ base 正确），**全部直连可达**，
+延迟 84–3148ms、多数 < 700ms（TokenDance 84ms / StepFun 125ms / 智谱 119ms / MiniMax 172ms）。
+
+**降级出口从三级收敛为两级**（上一版的三级里有一级是错的）
+
+| 级别 | 出口 | 玩家要做什么 |
+|---|---|---|
+| 0（唯一主路径） | 认领探测命中 | **什么都不用**，只粘 key |
+| 1 | **选平台名**（不是填 URL） | 从**中文品牌名**下拉里点一个 → 自动填 base + 默认模型，并立刻复探一次 |
+| 2 | 诚实回落本地判定库 | 无。明确说「没认出这把 Key 属于哪家」，并列出已收录名单 |
+
+~~「告诉他去哪找 Base URL」~~ —— 整条删除，由反证 ① ② ③ 支撑。
+
+**手填 Base URL 从「高级出口」降为「开发者后门」**：折叠在 `#ai-adv` 里，不占默认动线，
+只对自建网关 / 中转站用户有效（他们的服务商本来就交付了「接口地址」）。认领失败时
+`game.js` 会**自动展开**这个折叠区，不让玩家自己去找。
+
+**同时给 PotGen 铺了通道 A**（`genpotDirect()`）。这不是顺手多做的：标题屏 badge 在
+`directBase` 非空时会说「AI 判定 + **AI 生成锅**」，若只做判定不做生成，那句话就是
+**新的谎报** —— 与 §37 修掉的「检测到不可用却仍显示热路径」是同一类 bug。宁可多写 60 行，
+也不让 badge 说假话。校验仍然只在 `engine/potgen.js` 的 `sanitize()` 一处发生，
+直连拿到的原始数组走同一份逻辑。
+
+### 38.4 验证
+
+**三套，全绿**
+
+| 脚本 | 覆盖 | 结果 |
+|---|---|---|
+| `scripts/smoke-test.ps1` | 项目自带 19 组端点回归 | **45 / 45** |
+| `bf/verify_ai_badge.js` | §37 的 badge 不说谎（本轮**升级**：加了假上游 + 注入候选池，否则识别会真去打 10 家真实平台） | **20 / 20** |
+| `bf/verify_direct.js` | **本轮新增**。通道 A 专项：候选池结构、UI 结构、认领命中全链路、直连判定、直连生成锅、认领失败的两级出口、选平台、清除 | **41 / 41** |
+
+`verify_direct.js` 的靶场用两个端口故意造成跨域：
+`8313` = 静态文件 + `/api/*`（扮演部署），`8314` = 假上游平台（扮演 DeepSeek 那类允许 CORS 的平台）。
+页面里注入一个只含 8314 的候选池，于是认领与直连全部打在本地 —— 既快，也不碰真实平台。
+
+**关键断言（打印出来的实况）**
+
+- 认领命中：上游收到 `[{kind:"claim",model:"__bf_probe_nonexistent_model__"}, {kind:"judge",model:"fake-model-1"}]`
+  → `cfg.directBase = http://127.0.0.1:8314/v1`，`#ai-base` 自动回填，
+  badge = `热路径 · 浏览器直连《假上游平台》 · AI 判定 + AI 生成锅`
+- 直连判定：`judgeFree → {ok:true, type:"事实型", pers:70, tech:"假上游测试手法"}`，且请求打向 8314 而非 `/api/judge`
+- 直连生成锅：`genpotDirect(2) → {ok:true, code:null, n:1}`
+- 认领失败：`#ai-adv.open = true`，hint 说「没认出…」且**不含** `Base URL` / `接口地址` 字样
+- 清除：`cfg.directBase = ""`，badge 回到代理通道
+
+**验收脚本自己抓出的两个缺口**（都已修）
+
+1. **认领失败时没告诉玩家「这个结论还没保存」。** 玩家在输入框试了一把新 key、没保存，
+   badge 仍按已保存凭据说话（这是 §37 定下的正确行为），但 hint 里没有脚注 —— 看起来就像
+   badge 坏了。已补上与 `finishProbeDirect` 同一套「（未保存 · 标题屏状态仍按已保存的凭据显示）」。
+2. **从下拉选平台后，检测通过但 badge 纹丝不动**（因为没落盘）。这与「认领成功直接落盘」
+   不一致，玩家会以为这个下拉是坏的。已改为「选平台 = 明确指定 → 直接落盘」；
+   没填 Key 时落盘也有用 —— 探针会立刻报「还没填 Key」，比什么都不说更好。
+
+（另：`verify_ai_badge.js` 的假上游第一版把 `res.statusCode` 写在 `writeHead` 之后，
+header 已发出导致 400 恒变成 200，认领判据全池读不到 400。已修并写进注释。）
+
+### 38.5 改动清单
+
+- **新增 `data/gateways.js`**：候选平台池，条目粒度 = 平台 × base 变体（`plat` 归组）；
+  字段 `{plat, nameZh, base, label, models, cors, home}`；11 条（10 个平台，StepFun 两条）；
+  导出 `list() / probeable() / platforms() / byPlat() / nameOf() / PROBE_MODEL`
+- **`index.html`**：`data/gateways.js` 脚本引入（在 `verdicts.js` 之后）；AI 区新增
+  `#ai-adv`（`<details>` 折叠）+ `#ai-platform` 下拉 + `#ai-base` + `.ai-note`「Key 只存你本机」
+- **`style.css`**：`.ai-row select`、`.ai-adv` / `summary` / `.ai-adv-note` / `.ai-note`；
+  `.title-ai.off` 规则覆盖 `.ai-adv`
+- **`engine/api.js`**：文件头新增双通道与安全铁律注释；`CFG` 新增
+  `directBase/directTemp/promptPath/genpotPath/genTimeout/identifyTimeout`；
+  `applyConfig` 支持 `directBase/promptPath/identifyTimeout`；`isEnabled()/isOnline()` 纳入通道 A；
+  `loadLocalCreds` 读 `bf.base`；`setCredentials(key, model, base)`（base 用 `undefined` 表示「不改动」）；
+  **新增** `ensurePrompt(path)`（按路径缓存，不硬编 prompt）、`identifyKey(key)`、`probeOne()/classifyProbe()`、
+  `judgeDirect()`、`genpotDirect()`、`probeDirect()`、`withDeadline()`、`stripFenceArr()`、`buildUserPromptDirect()`；
+  `judgeFree()` 改为按 `directBase` 分派到 `judgeDirect()` / `judgeServer()`（原实现改名）
+- **`engine/potgen.js`**：头注释更新为两条通道；新增 `viaDirect()`；
+  `prefetch()` 抽出 `absorb()`/`release()` 供两条通道共用
+- **`game.js`**：新增 `findGatewayByBase()/directGateway()/directPlatName()/inputKey()/recordProbe()/finishProbeDirect()/probeServer()/fillPlatformOptions()`；
+  `credTag()` 加入 base 维度（认领到不同端点 = 不同结论）；`refreshAiStatus()`/`updateMetaMode()` 插入通道 A 分支
+  （在 `!apiBase` 判断**之前** —— 直连不依赖同源后端）；`probeAI()` 重写为三条路径（手填地址 / 认领 / 服务端），
+  认领失败时按两级出口降级并自动展开 `#ai-adv`；`recheckAi()` 在直连模式下短路；
+  `probeErrMsg()` 补 `no_key/no_base/no_model/unrecognized/all_unreachable/prompt_unreachable/bad_json`；
+  `applyAiGate()` 纳入新控件；`boot()` 在直连模式下跳过 `checkBackend()`；开局 devLog 区分直连与代理
+- **新增脚本**：`bf/base_verify.py`（候选池 base 正确性，10/10）、`bf/base_multi.py`（多 base 变体 + 首页抓取可行性）、
+  `bf/verify_direct.js`（通道 A 专项验收 41 项）
+- **升级脚本**：`bf/verify_ai_badge.js`（假上游 + 注入候选池，14 → 20 项）
+
+### 38.6 教训
+
+- **凡是「提示用户去做 X」的设计，先问：用户凭他手上有的信息，做得到 X 吗。**
+  这个方案被连推三次，三次都是同一个病根 —— 我替他假设了他不可能具备的知识
+  （知道 base 必填、知道 base 在哪、知道自己的 key 属于哪家）。
+  最后一条甚至不是「他不知道」，而是「**平台根本不让他知道**」。
+- **「通用事实」是最危险的一类断言。** 「在拿到 key 的页面上通常写着 Base URL」听起来
+  无害，实则把一个需要逐平台验证的问题伪装成了一个不需要验证的问题。凡是能实测的，
+  就不要写成「通常」。
+- **降级出口必须是玩家能用的控件，而不是一句道理。** 选平台名的下拉（他认得品牌名）
+  ≫ 告诉他去哪找 URL（他找不到）≫ 不给他任何出口（等于没做）。
+- **加一条通道，就要把所有挂着「AI」字样的地方一起过一遍。** 只做判定不做生成锅，
+  badge 就会谎报「AI 生成锅」；只做生成不做判定同理。§37 的 bug 就是这么来的，
+  这类 bug 的共性是：**热路径的判断散落在多处，新增一条通路时总会漏掉某几处。**
+- **测试靶场要能看清每一次上游请求。** 这一轮的验收之所以能抓出两个缺口，是因为假上游
+  会**记录下每一次调用的 kind / model / key**，于是「认领打了没打」「直连打向哪里」
+  变成了可断言的事实，而不是靠读代码猜。
+
+---
+
+## 39. 认领之后的第二问：这把 Key 能用哪个模型跑判定（2026-09-14）
+
+### 39.1 需求
+
+> 「我希望实现的功能是玩家输入 key 后，能够检测平台，抓取 base（可以的话），侦测玩家填写的
+> key 对应平台中哪些能够使用 AI 功能」
+
+§38 交付的是第一问 —— **这把 Key 属于哪家平台**（`identifyKey()`）。
+这一轮补第二问：**这家平台里，哪个模型真的能跑本游戏的 AI 判定**。
+
+### 39.2 根因
+
+「认领成功」与「AI 真能用」之间隔着四道坎，任一道不过，玩家侧的表现都是
+「界面说连上了、游戏里却一句 AI 文案都没有」：
+
+| # | 坎 | 实测 |
+|---|---|---|
+| ① | **平台列出的模型绝大多数不是对话模型** | 实测 TokenDance `/models` 返回 **93 个**，其中 TTS / 语音 / 图像（seedream）/ 视频（seedance · kling · wan3 · happyhorse）/ 向量（embedding）/ OCR / 联网检索（unifuncs · bocha）占掉一大半，直接调就是 400 |
+| ② | **思考型模型正文为空** | 文件头 Bug#1 已记载：只吐思维链，`content` 为空串 |
+| ③ | **有的模型只支持流式** | 实测 `glm-4.5-air` 非流式调用直接失败，而本游戏只发非流式 |
+| ④ | **延迟**（最隐蔽） | 本游戏 `timeout 1850ms < flightMs 2000ms` 是硬约束。实测 TokenDance `qwen3-max` 要 ~3.0s → **判定还没回来就被超时丢弃**，玩家侧仍然走兜底。此时界面若显示「已检测可用」，就是 §37 那类谎报的翻版 |
+
+第 ④ 条决定了一件事：**这个侦测不能用 ping 来测**。ping 只让模型生成两个 token，实测延迟会
+严重偏低（几百 ms），据此判「可用」而实际 3s，等于又造一个谎报。**必须发一次真实判定请求**
+（真 prompt、真样例输入、走 `validate()`），才能同时回答「出不出合法 JSON」与「真实耗时」。
+
+### 39.3 实现
+
+**候选清单从哪来**（`listModels()`）—— 先实测了各家的 `/models` 端点（`bf/models_probe.py`）：
+
+| 平台 | `/models` 无 key | CORS | 结论 |
+|---|---|---|---|
+| TokenDance | **200**，93 个模型 | `ACAO: *` | **匿名开放**（不能用它判归属，见 §38；但可以拿来列清单） |
+| DeepSeek / SiliconFlow / Moonshot / 智谱 / DashScope / MiniMax / StepFun | **401** | 有（`*` 或回显 origin） | 端点存在且鉴权在 → **玩家带自己的 key 就能列出他账号可见的模型** |
+| 火山方舟 | 401 | **无任何 `Access-Control-*`** | 浏览器读不到 → 只能回落候选池的 `models`（graceful，不报错） |
+
+清单 = **作者预设（候选池 `models`）+ 平台 `/models`** 合并去重，再按下面的规则处理：
+
+- **先剔除非对话模型**（`MODEL_NOT_CHAT`：embed / rerank / tts / speech / voice / asr / whisper / ocr /
+  seedream / seedance / kling / wan3 / happyhorse / i2v / t2v / r2v / video / image / bocha / unifuncs /
+  web-search / moderation / dall / flux / sora …）与**思考型**（`MODEL_THINKING`）。
+- **同族去重**（`modelFamily()`：抹掉 `-0731` / `-0902` / `-preview` 这类尾缀）——
+  否则 TokenDance 的 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731` 会一次占掉两个候选位。
+- **排序**（`rankModels()`）：作者预设**恒定占前排**，其余按「快模型命名法」打分降序
+  （`flash/turbo/mini/lite/air/small/小参数量` 加分，`max/plus/pro/preview/70b+` 减分），
+  同分按平台返回的原始顺序 —— 保留网关自己的相关性排序。
+- **封顶 `CFG.probeMax`（默认 6）**。一家 93 个模型全测要烧 3 万 token、等一两分钟，
+  所以**分批**：一批 6 个，`nextOffset` 驱动 UI 上的「再测下一批」。
+
+**逐个实测**（`probeModelOnce()`）—— 复刻 `judgeDirect()` 的请求（同 system prompt、
+`buildUserPromptDirect(PROBE_JUDGE_SAMPLE)` 同一道固定例题，所以耗时横向可比），
+只多一条 `max_tokens: CFG.probeMaxTokens`（320，给玩家省钱）。于是**一次调用回答四件事**：
+
+1. 模型存在且这把 key 能用（401 / 402 / 403 在这里暴露）
+2. 出不出正文（思考型 → `empty_content`）
+3. 出不出**合法**判定 JSON（`validate()` 全过 → 否则 `bad_output`）
+4. **真实耗时** —— 能不能进 1850ms 判定预算的唯一依据
+
+**结论聚合**（`probeModels()` + `bestOf()`）：
+
+```js
+bestOf(rows) → { best, budget, code }
+  best   = 最快的可用模型（ok 且 latencyMs 最小）
+  budget = { timeout, flightMs, enough, needMs, needFlightMs }
+           enough = best.latencyMs <= CFG.timeout        ← 「可用」的判定标准
+           needMs = best.latencyMs + 150                 ← 该档的 timeout
+  code   = 一个都不能用时取**精确**原因：全 401 → http_401（是 key 的错）；
+           各模型原因不一致才回落笼统的 all_models_failed
+```
+
+`bestOf()` 单独暴露出来是给 UI 跨批次累加用的（见下面的教训）。
+
+**降级出口仍然是「不谎报」**：
+
+| 情况 | 结果 | badge 说什么 |
+|---|---|---|
+| 有模型可用且进预算 | 自动选用最快那个并落盘 | `热路径 · 浏览器直连《X》 · AI 判定 + AI 生成锅` |
+| 有模型能跑但**全部超预算** | 探针记为 `over_budget`，**不选**，给一键「放宽判定预算」 | `AI 不可用：模型能跑，但比判定预算慢… · 走本地判定库 N 条` |
+| 全部不可用 | 记精确失败码 | `AI 不可用：<原因> · 走本地判定库 N 条` |
+| 这家不提供 `/models` 且无预设 | 回落 §38 的 `probeDirect()` 单模型探针 | 按探针结论 |
+
+**一键放宽预算**（`setBudget()`）：只在玩家**显式点击**时才改 `timeout/flightMs`
+（代价是锅飞得更久，属游戏手感取舍，不该由程序替他决定），并写进 localStorage 跨会话保留；
+`resetBudget()` 在「清除」时还原出厂值——否则玩家清掉 key 后仍在用 3.2s 的预算，锅白飞得久还找不到原因。
+仍然守住 `timeout < flightMs` 这条硬约束。
+
+**UI**（`game.js` 的 `runModelDetect()` / `renderDetect()`）：`#ai-detect` 面板列出每行
+`模型名 / 实测耗时 / 结论`，三态用 class 区分 —— `ok`（可用）/ **`slow`（能跑但超预算，独立一态）**/
+`bad`（用不了，原因取自 `probeErrMsg`）。可用的排最前；当前选用的那行加 `●` + `.cur` 高亮；
+点任意一行 = 复测并选用；底部是「再测下一批」与「放宽判定预算」。
+渲染用 DOM API 而非 `innerHTML` —— 模型名来自外部接口，不可信。
+
+### 39.4 验证
+
+**四套，全绿**
+
+| 脚本 | 覆盖 | 结果 |
+|---|---|---|
+| `bf/verify_models.js` | **本轮新增**。候选筛选与排序 / 认领 → 自动实测 / 分批再测 / 超预算不谎报 / 一键放宽 / 清除还原 | **52 / 52** |
+| `bf/verify_direct.js` | §38 通道 A 全链路回归 | **41 / 41** |
+| `bf/verify_ai_badge.js` | §37 badge 不说谎回归 | **20 / 20** |
+| `scripts/smoke-test.ps1` | 项目自带端点回归 | **45 / 45** |
+
+`verify_models.js` 的靶场：`8333` = 静态文件且 **`/api/*` 一律 404**（故意模拟 GitHub Pages
+那种没有后端的宿主，证明模型侦测完全不依赖同源后端）；`8334` = 假上游平台，公布 12 个模型，
+覆盖五种情况 —— 快模型 / 慢模型 / 空正文思考型 / 401 / 非对话模型。假上游与驱动脚本在**同一个
+Node 进程**里，所以可以中途翻转行为（`state.slowAll`），在同一个会话里跑完「正常」与
+「全部超预算」两条分支。
+
+**关键断言（打印出来的实况）**
+
+- 候选清单：`12 个模型 → 过滤去重后 8 个候选`，顺序 `fake-model-1, fast-chat-flash,
+  slow-chat-turbo, noauth-mini, extra-lite-1..4` —— 思考型 / 向量 / 视频被剔除，同族 `-0731` 被去重，
+  作者预设置顶
+- 上游实收：`1 次认领 + 6 次判定`（都带玩家 key 尾 4 位 `1234`），即「一批 6 个」是硬行为
+- 三态：`fake-model-1` → `ok`（20ms）；`slow-chat-turbo` → **`slow`「可用但超预算 1.7×」**；
+  `noauth-mini` → `bad`（401）
+- 跨批次：第二批（`extra-lite-3/4`，**全是 401**）回来后**没有冲掉**第一批的可用结论 ——
+  `#ai-model` 仍是首选、探针仍 `ok:true`、badge 仍「热路径」
+- 超预算分支：`state.slowAll` 之后重测 → hint 明说「超过判定预算…游戏里仍走兜底」，
+  badge 改口为 `AI 不可用：…`，探针落 `over_budget`，出现「放宽判定预算」主按钮
+- 点放宽：`timeout` 上调到超过实测耗时、`flightMs > timeout`、探针翻正、badge 回到热路径、
+  且写进 `localStorage.bf.timeout`
+- 清除：base 清空 + 预算还原 1850/2000 + 面板收起 + localStorage 预算键被删
+- 全程零 `Runtime.exceptionThrown` / `console.error`
+
+### 39.5 改动清单
+
+- **`engine/api.js`**
+  - `CFG` 新增 `probeMax(6)` / `probeTimeout(12000)` / `probeAllTimeout(26000)` / `probeMaxTokens(320)`；
+    新增出厂快照 `DEFAULT_TIMEOUT` / `DEFAULT_FLIGHT`；`applyConfig` 支持这四个新键；
+    `loadLocalCreds` 读回 `bf.timeout` / `bf.flightMs`（**放宽过的预算必须跨会话留住**，否则
+    「昨天好好的，今天又没 AI 了」）
+  - 新增 `listModels()` / `rankModels()` / `isChatModel()` / `modelScore()` / `modelFamily()` /
+    `MODEL_NOT_CHAT` / `MODEL_THINKING` / `MODEL_FAST_HINT` / `MODEL_SLOW_HINT` / `PROBE_JUDGE_SAMPLE`
+  - 新增 `probeModelOnce()` / `probeModels()` / `bestOf()` / `budgetOf()` / `setBudget()` / `resetBudget()`
+  - 导出以上 6 个新接口（`listModels` / `probeModels` / `probeModelOnce` / `bestOf` / `setBudget` / `resetBudget`）
+- **`game.js`**
+  - 新增 `detectRows` / `hideDetect()` / `rowStatus()` / `usableCount()` /
+    `runModelDetect()` / `renderDetect()` / `pickModel()` / `relaxBudget()`
+  - `probeAI()`：认领成功后由「一次 ping」改为「认领 → 自动批量实测 → 自动选用最快可用模型」；
+    手填 base 路径同样走实测，但**是否落盘取决于该地址是否就是当前生效的那个**
+    （是 → 落盘；是新草稿 → 不落盘，守 §37 的规矩）
+  - `probeServer()` 与每次检测开始时收起旧的实测面板；`probeErrMsg()` 补
+    `no_models` / `all_models_failed` / `over_budget` / `bad_output`
+  - 「清除」按钮：一并 `hideDetect()` + `resetBudget()`（并告知玩家预算已还原）
+- **`index.html`**：AI 区新增 `#ai-detect` 容器（`hidden` 初始态）
+- **`style.css`**：新增 `.ai-detect` / `.ai-detect-hd` / `.ai-detect-list` / `.ai-drow`（含
+  `.ok` / `.slow` / `.bad` / `.cur` 四态）/ `.ai-detect-act`（含 `.primary`）/ `.ai-detect-note`；
+  `.title-ai.off .ai-detect` 变灰且 `pointer-events:none`（否则 AI 关着时点行仍会真发上游请求）
+- **新增脚本**：`bf/models_probe.py`（各平台 `/models` 端点 + CORS 探测）、`bf/models_dump.py`
+  （TokenDance 全量模型清单 + 排序启发式验证）、`bf/verify_models.js`（52 项验收）
+
+### 39.6 教训
+
+- **「认出来了」不等于「能用」——中间隔着「哪个模型」。** 认领只证明 key 属于这家平台，
+  离「玩家真的会看到 AI 文案」还差四道坎（非对话模型 / 思考型 / 只支持流式 / 延迟超预算）。
+  凡是「联通性检测」，都要再问一句：**它测出的结论，与玩家最终感受到的东西之间还差几步？**
+- **延迟必须用真实负载测。** 用 ping 测延迟会得到一个漂亮的、严重偏低的数字，
+  然后据此写下「可用」——**比不测更糟**，因为它给出了虚假的确定性。要测延迟，就用真实的
+  prompt 与真实的输出长度。这一条与 §37 的「结论要有持久化落点」是同一族问题。
+- **「可用」的判定标准要写进代码，不要留在注释里。** 本轮把它落成
+  `budget.enough = best.latencyMs <= CFG.timeout`，于是「超预算」成了一个**独立的一态**
+  （`slow`），而不是被偷偷归进「可用」或「不可用」。界面上的三态就是这么来的。
+- **分批累加时，结论要跨批次取最优。** 第一版让 `best` 只看最新一批，于是玩家点「再测下一批」、
+  而那批恰好全是不可用的模型时，上一批已经测出来的可用结论被冲掉 —— 玩家看到的是
+  「越测越差，明明测出过能用的，现在又说不行了」。**验收脚本抓到了这个**（`extra-lite-*` 全是 401
+  正好触发了这个路径），改为 `bestOf(detectRows)` 跨批次取最优 —— 这也正是把 `bestOf` 从
+  `probeModels` 里单独提出来的原因。
+- **失败原因要尽量精确，别一句话盖住所有情况。** 一把失效的 key 会让每个模型都回 401，
+  这时正确的提示是「Key 无效或已过期（401）」；说「试过的模型都用不了」等于把最可能的原因藏起来。
+  这一条同样是**旧验收脚本抓出来的** —— `verify_ai_badge.js` 从 20/20 掉到 16/20，
+  因为它断言的就是那句精确文案。
+- **测试断言不要建立在「竞态」上。** 第一版假上游给两个「快模型」都设 20ms 延迟，而本机**首个**
+  请求还要付 TCP 建连的钱，谁最快就成了竞态 —— 断言随机漂移（实测撞到过一次，第二轮才复现）。
+  延迟要**刻意拉开档位**，让「最快」是确定性的。
+- **改一条主路径，就要预期旧验收脚本会全线变红。** 本轮把认领后的路径从「一次 ping」换成
+  「认领 + 实测一批」，`verify_direct.js` 的调用计数断言、`verify_ai_badge.js` 的错误码断言
+  全部受影响。**先跑旧脚本、再看新脚本**，顺序反过来就会把回归当成通过。

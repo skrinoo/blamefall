@@ -184,6 +184,8 @@ html[data-theme="light"] .screen::before {
 
 .title-meta { margin-top: 26px; font-size: 11px; color: var(--ink-faint); letter-spacing: .05em; }
 .title-meta .sep { margin: 0 8px; opacity: .5; }
+/* badge 说「AI 不可用」时染红：检测结论必须能一眼看见，不能只藏在设置弹窗里 */
+#meta-mode.bad { color: var(--bad); }
 
 /* 标题屏设置行：自由输入读秒 */
 .title-set {
@@ -229,7 +231,7 @@ html[data-theme="light"] .screen::before {
 .ai-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-dim); cursor: pointer; user-select: none; }
 .ai-toggle input { width: 15px; height: 15px; accent-color: var(--good); cursor: pointer; flex: none; }
 /* 开关关闭时凭据区变淡，视觉上和「纯本地版」对应 */
-.title-ai.off .ai-row, .title-ai.off .ai-actions { opacity: .45; }
+.title-ai.off .ai-row, .title-ai.off .ai-actions, .title-ai.off .ai-adv { opacity: .45; }
 .ai-row { display: flex; gap: 8px; }
 .ai-row input {
   flex: 1; font-family: inherit; font-size: 12px; color: var(--ink);
@@ -237,10 +239,78 @@ html[data-theme="light"] .screen::before {
   outline: none; transition: border-color .18s;
 }
 .ai-row input:focus { border-color: var(--good); }
+/* 平台下拉：造型与 .ai-row input 保持一致，避免同一张卡里出现两种控件语言 */
+.ai-row select {
+  flex: 1; font-family: inherit; font-size: 12px; color: var(--ink);
+  background: var(--field); border: 1px solid var(--field-edge); border-radius: 8px; padding: 8px 10px;
+  outline: none; cursor: pointer; transition: border-color .18s;
+}
+.ai-row select:focus { border-color: var(--good); }
 .ai-hint { font-size: 11px; color: var(--ink-faint); line-height: 1.5; min-height: 1em; }
 .ai-hint.ok { color: var(--good); }
 .ai-hint.bad { color: var(--bad); }
 .ai-actions { display: flex; gap: 8px; }
+/* ── 降级出口（折叠）──────────────────────────────────
+   默认完全不出现在动线上：玩家要做的只有粘一把 Key。
+   认领失败时 game.js 会自动展开它（不是让玩家自己去找）。
+   里面的两条路径按「玩家实际能提供什么」排序：
+     ① 选平台名 —— 他认得中文品牌名
+     ② 填 Base URL —— 开发者后门，只对自建网关/中转站用户有效 */
+.ai-adv { border-top: 1px solid var(--line); padding-top: 8px; }
+.ai-adv summary {
+  font-size: 11px; color: var(--ink-faint); cursor: pointer; user-select: none;
+  list-style: none; outline: none;
+}
+.ai-adv summary::-webkit-details-marker { display: none; }
+.ai-adv summary::before { content: "▸ "; }
+.ai-adv[open] summary::before { content: "▾ "; }
+.ai-adv summary:hover { color: var(--ink-dim); }
+.ai-adv[open] summary { margin-bottom: 8px; color: var(--ink-dim); }
+.ai-adv .ai-row + .ai-row { margin-top: 8px; }
+.ai-adv-note { font-size: 11px; color: var(--ink-faint); line-height: 1.6; margin-top: 8px; }
+/* 永久说明：直连通道下 key 根本不出本机，代理通道也只是转发不存储 */
+.ai-note { font-size: 11px; color: var(--ink-faint); line-height: 1.5; }
+
+/* ── 模型可用性实测结果（用玩家自己的 Key 真跑一次判定）──
+   结论分三态：ok（可用）/ slow（能跑但超出判定预算，会被超时丢弃）/ bad（用不了）。
+   slow 刻意独立成一态 —— 它是最容易被谎报成「可用」的一种。 */
+.ai-detect {
+  margin-top: 8px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2);
+}
+.ai-detect[hidden] { display: none; }
+.ai-detect-hd { font-size: 11px; color: var(--ink-faint); line-height: 1.5; margin-bottom: 6px; }
+.ai-detect-list { display: flex; flex-direction: column; gap: 4px; }
+.ai-drow {
+  display: grid; grid-template-columns: 1fr 58px auto; align-items: center; gap: 8px;
+  width: 100%; padding: 5px 8px; text-align: left; cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--ink);
+  background: transparent; border: 1px solid var(--line); border-radius: 6px;
+}
+.ai-drow:hover { border-color: var(--ink-faint); }
+.ai-drow .dm {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.ai-drow .dt { color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+.ai-drow .dn { color: var(--ink-faint); }
+.ai-drow.ok        { border-color: rgba(240,165,44,.45); }
+.ai-drow.ok   .dn  { color: var(--good); }
+.ai-drow.slow .dn  { color: var(--crit); }
+.ai-drow.bad  .dn  { color: var(--bad); }
+.ai-drow.bad  .dm  { color: var(--ink-faint); text-decoration: line-through; }
+.ai-drow.cur       { border-color: var(--good); background: rgba(240,165,44,.08); }
+.ai-detect-act {
+  display: block; width: 100%; margin-top: 6px; padding: 6px 8px; cursor: pointer;
+  font: inherit; font-size: 11px; color: var(--ink-dim); text-align: center;
+  background: transparent; border: 1px dashed var(--line); border-radius: 6px;
+}
+.ai-detect-act:hover { color: var(--ink); border-color: var(--ink-faint); }
+.ai-detect-act.primary { border-style: solid; border-color: var(--good); color: var(--good); }
+.ai-detect-act.primary:hover { background: rgba(240,165,44,.1); }
+.ai-detect-note { font-size: 10px; color: var(--ink-faint); line-height: 1.5; margin-top: 6px; }
+/* AI 关闭时整块变灰且不可点（否则点行会真的发一次上游请求） */
+.title-ai.off .ai-detect { opacity: .5; pointer-events: none; }
 
 /* ═══════════════════════ 设置弹窗（统一入口）═══════════════════════════ */
 /* 标题屏动作按钮组（静音 + 设置） */

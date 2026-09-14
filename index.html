@@ -276,7 +276,7 @@
           </div>
           <div class="ai-row">
             <input id="ai-model" type="text" autocomplete="off" list="ai-models"
-                   placeholder="模型 ID（可选·留空用默认）">
+                   placeholder="模型 ID（可选·认领成功后自动填）">
             <datalist id="ai-models">
               <option value="gemini-2.5-flash"></option>
               <option value="gemini-2.5-pro"></option>
@@ -285,6 +285,37 @@
             <button id="ai-probe" type="button" class="btn btn-ghost btn-sm">检测</button>
           </div>
           <div class="ai-hint" id="ai-hint"></div>
+          <!-- 模型可用性侦测结果：用玩家自己的 Key **真跑一次判定**，逐个模型给出结论 + 实测耗时。
+               这是「这把 Key 能用哪个模型跑 AI」的答案落点，也是唯一能揭穿
+               「连上了、却说可用、游戏里永远走兜底」的地方 —— 模型比判定预算慢时，
+               判定还没回来就被超时丢弃，玩家侧表现就是「没有 AI」。
+               内容由 game.js 的 renderDetect() 渲染，见该函数注释。 -->
+          <div class="ai-detect" id="ai-detect" hidden></div>
+          <!-- 玩家不需要知道 base URL —— 实测证明他也不可能知道（控制台只写 key、
+               首页 HTML 抓不到、首页写的还可能是错的、同平台可能有多套 base 取决于套餐）。
+               所以 base 默认完全不出现在动线上，由 identifyKey() 认领得出。
+               这里折叠的是两条降级路径，按「玩家实际能提供什么」排序：
+                 ① 选平台名  —— 出口 1，玩家认得品牌名
+                 ② 填 Base URL —— 开发者后门，只对自建网关/中转站用户有效
+                    （他们的服务商本来就交付了「接口地址」）
+               认领失败时 game.js 会自动展开这个 <details>，不让玩家自己找。 -->
+          <details class="ai-adv" id="ai-adv">
+            <summary id="ai-adv-sum">认不出这把 Key 属于哪家？手动指定</summary>
+            <div class="ai-row">
+              <select id="ai-platform" aria-label="选择平台">
+                <option value="">— 选择你注册的平台 —</option>
+              </select>
+            </div>
+            <div class="ai-row">
+              <input id="ai-base" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="网关地址，如 https://api.xxx.com/v1">
+            </div>
+            <div class="ai-adv-note" id="ai-adv-note">
+              自建网关 / 第三方中转站：服务商给你的「接口地址」填在这里。<br>
+              用官方平台（DeepSeek · 硅基流动 · 智谱…）不需要填 —— 会自动认出来。
+            </div>
+          </details>
+          <div class="ai-note">Key 只保存在你本机浏览器，不存储到服务器。</div>
           <div class="ai-actions">
             <button id="ai-save" type="button" class="btn btn-primary btn-sm">保存</button>
             <button id="ai-clear" type="button" class="btn btn-ghost btn-sm">清除</button>
@@ -321,6 +352,7 @@
 <script src="data/arguments.js"></script>
 <script src="data/verdicts.js"></script>
 <script src="data/commentary.js"></script>
+<script src="data/gateways.js"></script>
 <script src="engine/fallback.js"></script>
 <script src="engine/judge.js"></script>
 <script src="engine/api.js"></script>
